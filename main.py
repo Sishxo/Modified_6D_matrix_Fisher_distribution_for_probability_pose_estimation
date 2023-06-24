@@ -29,6 +29,14 @@ def vmf_loss(net_out, R, overreg=1.05):
     Rest = loss.batch_torch_A_to_R(A)
     return loss_v, Rest
 
+def reconstruct_R9d(R6d):
+    matrix_2x3 = np.reshape(R6d, (3, 2))
+    matrix_3x3 = np.hstack((matrix_2x3, np.cross(matrix_2x3[:, 0], matrix_2x3[:, 1])[:, np.newaxis]))
+    q, _ = np.linalg.qr(matrix_3x3)
+    vector_9d = np.reshape(q, 9)
+    
+    return vector_9d
+
 def get_pascal_no_warp_loaders(batch_size, train_all, voc_train):
     dataset = Pascal3D.Pascal3D(dataset_dir, train_all=train_all, use_warp=False, voc_train=voc_train)
     dataloader_train = torch.utils.data.DataLoader(
@@ -217,7 +225,8 @@ def train_model(loss_func, out_dim, train_setting):
             R = extrinsic[:, :3,:3].to(device)
             class_idx = class_idx_cpu.to(device)
             out = model(image, class_idx)
-            losses, Rest = loss_func(out, R, overreg=1.025)
+            out_9d=reconstruct_R9d(out)
+            losses, Rest = loss_func(out_9d, R, overreg=1.025)
 
             if losses is not None:
                 loss = torch.mean(losses)
@@ -244,6 +253,7 @@ def train_model(loss_func, out_dim, train_setting):
                 R = extrinsic[:,:3,:3].to(device)
                 class_idx = class_idx_cpu.to(device)
                 out = model(image, class_idx)
+                out_9d=reconstruct_R9d(out)
                 losses, Rest = loss_func(out, R)
                 if losses is None:
                     losses = torch.zeros(R.shape[0], dtype=R.dtype, device=R.device)
@@ -363,7 +373,7 @@ def parse_config():
 import shutil
 def main():
     train_setting = parse_config()
-    train_model(vmf_loss, 9, train_setting)
+    train_model(vmf_loss, 6, train_setting)
 
 if __name__ == '__main__':
     main()
