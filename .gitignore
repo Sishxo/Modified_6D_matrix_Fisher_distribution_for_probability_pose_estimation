@@ -1,0 +1,12 @@
+logs
+saved_logs
+*__pycache__*
+.nfs*
+images
+plots
+datasets
+github_images
+*.log
+*.out
+README.md
+README.txt
