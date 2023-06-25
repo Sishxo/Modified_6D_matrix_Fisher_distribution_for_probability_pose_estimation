@@ -1,8 +1,15 @@
+import sys
+sys.path.append("..")
+
 import torch
 import torch.nn as nn
 import numpy as np
 import absl.flags as flags
 from absl import app
+from PIL import Image
+from torchvision import transforms
+import torch
+from Pascal3D import Pascal3D
 
 import torch.nn.functional as F
 
@@ -14,6 +21,28 @@ sys.path.append(root_path)
 
 from network.resnet import resnet50, resnet101, ResnetHead
 from network.PoseR import Rot_red, Rot_green
+
+dataset_dir = '/data0/sunshichu/projects/Modified_6D_matrix_Fisher_distribution_for_probability_pose_estimation/datasets'
+
+def get_pascal_no_warp_loaders(batch_size, train_all, voc_train):
+    dataset = Pascal3D.Pascal3D(dataset_dir, train_all=train_all, use_warp=False, voc_train=voc_train)
+    dataloader_train = torch.utils.data.DataLoader(
+        dataset.get_train(False),
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=8,
+        worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2**32)),
+        pin_memory=True,
+        drop_last=True)
+    dataloader_eval = torch.utils.data.DataLoader(
+        dataset.get_eval(),
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=8,
+        worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2**32)),
+        pin_memory=True,
+        drop_last=False)
+    return dataloader_train, dataloader_eval
 
 class Fisher_n6d(nn.Module):
     def __init__(self, base, n_classes, embedding_dim, num_hidden_nodes, n_out):
@@ -42,19 +71,28 @@ class Fisher_n6d(nn.Module):
 def main(argv):
     points = torch.rand(2, 1286, 1500)  # batchsize x feature x numofpoint
     
-    im = '/data2/llq/distri/matrix_fisher/datasets/Pascal3d/Images/boat_pascal/2008_000120.jpg'
-    class_idx =  13
-    
-    #test
-    
-    base = resnet50(im)
+    base = resnet50()
     n_classes = 13 # for pascal
     embedding_dim = 32 # for pascal3d_no_augment.json
     n_out = 9
     
+    batch_size = 4
+    train_all = True
+    voc_train = False
+    dataloader_train, dataloader_eval = get_pascal_no_warp_loaders(batch_size, train_all, voc_train)
+    
+    for image, extrinsic, class_idx_cpu, hard, _, _ in dataloader_train:
+        im = image
+        print(im.shape)
+        class_idx=class_idx_cpu
+        break
+    
+    print(class_idx.shape)
     feature = ResnetHead(base, n_classes, embedding_dim, 512, n_out)
     output = feature.forward(im, class_idx)
-    print("ResnetHead output = ", output)
+    print("ResnetHead output = ", output.shape)
+    print(output)
+    #input()
     
     # rot_head_red = Rot_red()
     # print("rotation head red = ", rot_head_red.shape())

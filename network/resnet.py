@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+
 try:
     from torch.hub import load_state_dict_from_url
 except ImportError:
@@ -244,8 +245,13 @@ class ResnetHead(nn.Module):
         if self.class_embedding is None:
             return self.head(latent_space)
         else:
+            print(class_idx.shape)
             class_feature = self.class_embedding(class_idx)
+            print(class_feature.shape)
+            print(latent_space.shape)
             conc = torch.cat([latent_space, class_feature], dim=1)
+            print(conc.shape)
+            #input()
             return self.head(conc)
 
 
