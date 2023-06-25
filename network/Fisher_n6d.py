@@ -45,6 +45,8 @@ def main(argv):
     im = '/data2/llq/distri/matrix_fisher/datasets/Pascal3d/Images/boat_pascal/2008_000120.jpg'
     class_idx =  13
     
+    #test
+    
     base = resnet50(im)
     n_classes = 13 # for pascal
     embedding_dim = 32 # for pascal3d_no_augment.json
@@ -53,7 +55,6 @@ def main(argv):
     feature = ResnetHead(base, n_classes, embedding_dim, 512, n_out)
     output = feature.forward(im, class_idx)
     print("ResnetHead output = ", output)
-    
     
     # rot_head_red = Rot_red()
     # print("rotation head red = ", rot_head_red.shape())
