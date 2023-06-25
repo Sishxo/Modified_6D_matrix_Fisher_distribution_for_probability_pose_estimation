@@ -50,12 +50,13 @@ def main(argv):
     embedding_dim = 32 # for pascal3d_no_augment.json
     n_out = 9
     
-    # rot_head_red = Rot_red()
-    # print("rotation head red = ", rot_head_red.shape())
-    
     feature = ResnetHead(base, n_classes, embedding_dim, 512, n_out)
     output = feature.forward(im, class_idx)
     print("ResnetHead output = ", output)
+    
+    
+    # rot_head_red = Rot_red()
+    # print("rotation head red = ", rot_head_red.shape())
 
     # p_green_R, p_red_R, f_green_R, f_red_R = Fisher_n6d(base, n_classes, embedding_dim, 512, n_out)
     # print("green vector = ", p_green_R.shape())
