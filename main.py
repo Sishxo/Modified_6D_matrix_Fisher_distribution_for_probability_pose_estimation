@@ -217,8 +217,7 @@ def train_model(loss_func, out_dim, train_setting):
             class_idx = class_idx_cpu.to(device)
             
             out = model(image, class_idx)
-            p_green_R, p_red_R, f_green_R, f_red_R = Fisher_n6d(base, class_idx, \
-                                                                embedding_dim, num_hidden_nodes, n_out)
+            p_green_R, p_red_R, f_green_R, f_red_R = Fisher_n6d(base, class_idx, embedding_dim, num_hidden_nodes, n_out)
 
             loss_vmf, Rest = vmf_loss(out, R, overreg=1.025)   
             loss_rot_conf = loss_R_con(f_green_R, f_red_R, p_green_R, p_red_R, R)        
