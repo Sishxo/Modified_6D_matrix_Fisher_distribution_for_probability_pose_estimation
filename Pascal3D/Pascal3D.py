@@ -517,7 +517,7 @@ class Pascal3D():
         if dataset_location==None:
             dataset_location = '/data2/llq/distri/matrix_fisher/datasets'
         self.location = os.path.join(dataset_location, DATASET_FOLDER_NAME)
-        print(self.location)
+        print("Location of pascal datasets is: ", self.location)
         if not os.path.exists(self.location):
             raise Exception("Not implemented yet")
             download_pascal3d(self.location) #TODO unzip as well

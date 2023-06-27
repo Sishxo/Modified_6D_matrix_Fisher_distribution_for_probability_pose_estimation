@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+
 try:
     from torch.hub import load_state_dict_from_url
 except ImportError:
@@ -234,7 +235,7 @@ class ResnetHead(nn.Module):
             nn.BatchNorm1d(num_hidden_nodes),
             nn.LeakyReLU(),
             nn.Linear(num_hidden_nodes, num_hidden_nodes),
-            nn.BatchNorm1d(num_hidden_nodes),
+            nn.BatchNorm1d(num_hidden_nodes), # num_hidden_nodes=512
             nn.LeakyReLU(),
             nn.Linear(num_hidden_nodes, n_out)
         )
@@ -246,6 +247,10 @@ class ResnetHead(nn.Module):
         else:
             class_feature = self.class_embedding(class_idx)
             conc = torch.cat([latent_space, class_feature], dim=1)
+            print("resnet101 = ", latent_space.shape)
+            print("class_feature = ", class_feature.shape)
+            print("conc.shape = ", conc.shape)
+            #input()
             return self.head(conc)
 
 
