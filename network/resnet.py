@@ -247,9 +247,9 @@ class ResnetHead(nn.Module):
         else:
             class_feature = self.class_embedding(class_idx)
             conc = torch.cat([latent_space, class_feature], dim=1)
-            print("resnet101 = ", latent_space.shape)
-            print("class_feature = ", class_feature.shape)
-            print("conc.shape = ", conc.shape)
+            # print("resnet101 = ", latent_space.shape)
+            # print("class_feature = ", class_feature.shape)
+            # print("conc.shape = ", conc.shape)
             #input()
             return self.head(conc)
 

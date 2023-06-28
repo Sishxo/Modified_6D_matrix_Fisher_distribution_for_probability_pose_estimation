@@ -72,35 +72,30 @@ class Fisher_n6d(nn.Module):
 
     def forward(self, im):
         feat = self.backbone(im) # feat = [bs, 2048, 8, 8], actually [bs, 512, 7, 7]
-        #print("feat = ", feat.shape)
         # 6d normal vectors
-        green_R_vec, red_R_vec = self.rot_head(feat)  # green_R_vec = [bs, 4, 56, 56]
-        #print("green_R_vec = ", green_R_vec.shape)
-        # normalization: green_R_normalized = [bs, 3, 56, 56]
+        net_F, green_R_vec, red_R_vec = self.rot_head(feat)  # green_R_vec = [bs, 4]
+        # normalization: green_R_normalized = [bs, 3]
         p_green_R = green_R_vec[:, 1:] / (torch.norm(green_R_vec[:, 1:], dim=1, keepdim=True) + 1e-6) 
         p_red_R = red_R_vec[:, 1:] / (torch.norm(red_R_vec[:, 1:], dim=1, keepdim=True) + 1e-6)
-        #print("green_R_normalized = ", p_green_R.shape)
         # sigmoid for confidence
-        f_green_R = torch.sigmoid(green_R_vec[:, 0]) # f_green_R = [bs, 56, 56]
+        f_green_R = torch.sigmoid(green_R_vec[:, 0]) # f_green_R = [bs]
         f_red_R = torch.sigmoid(red_R_vec[:, 0])
-        #print("green_R_confi = ", f_green_R.shape)
-        return p_green_R, p_red_R, f_green_R, f_red_R
+        return net_F, p_green_R, p_red_R, f_green_R, f_red_R
     
 def main(argv):            
     arch = 'resnet'
     back_freeze = False
     back_input_channel = 3 # # channels of backbone's input
-    back_layers_num = 34   # 18 | 34 | 50 | 101 | 152
-    back_filters_num = 256  # number of filters for each layer
+    back_layers_num = 101   # 18 | 34 | 50 | 101 | 152
     
     rot_layers_num = 3
     rot_filters_num = 256 
     rot_conv_kernel_size = 3 
     rot_output_conv_kernel_size = 1
-    rot_output_channels = 8 
+    rot_output_channels = 17 
     rot_head_freeze = True
 
-    batch_size = 4
+    batch_size = 32
     train_all = True
     voc_train = False
     dataloader_train, dataloader_eval = get_pascal_no_warp_loaders(batch_size, train_all, voc_train)
@@ -113,20 +108,21 @@ def main(argv):
     
     base = resnet101()
     block_type, layers, in_channels, name = resnet_spec[back_layers_num]
-    backbone = ResNetBackboneNet(block_type, layers, back_input_channel=3, back_freeze=False)
+    backbone = ResNetBackboneNet(block_type, layers, back_input_channel, back_freeze)
     feature = backbone.forward(im)  # features = [bs, 512, 7, 7]
     # print("feature = ", feature.shape) 
     
-    rot_head_net = RotHeadNet(in_channels[-1], rot_layers_num=3, rot_filters_num=256, 
-                              rot_conv_kernel_size=3, rot_output_conv_kernel_size=1,
-                              rot_output_channels=8, rot_head_freeze=True)
-    rot_green, rot_red = rot_head_net.forward(feature) # rot_green = [bs, 4, 56, 56]
+    rot_head_net = RotHeadNet(in_channels[-1], rot_layers_num, rot_filters_num, 
+                              rot_conv_kernel_size, rot_output_conv_kernel_size,
+                              rot_output_channels, rot_head_freeze)
+    net_F, rot_green, rot_red = rot_head_net.forward(feature) # rot_green = [bs, 4, 56, 56]
     # print("rotation head green = ", rot_green.shape)
 
     model = Fisher_n6d(backbone, rot_head_net)
-    p_green_R, p_red_R, f_green_R, f_red_R = model.forward(im)
-    print("green vector = ", p_green_R.shape) # p_green_R = [bs, 3, 56, 56]
-    print("green confidence = ", f_green_R.shape) # f_green_R = [bs, 56, 56]
+    net_F, p_green_R, p_red_R, f_green_R, f_red_R = model.forward(im)
+    # print("green vector = ", p_green_R.shape) # p_green_R = [bs, 3, 56, 56]
+    # print("green confidence = ", f_green_R.shape) # f_green_R = [bs, 56, 56]
+    # print("net_F = ", net_F.shape)
 
 if __name__ == "__main__":
     app.run(main)

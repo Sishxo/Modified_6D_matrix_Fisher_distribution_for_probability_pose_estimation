@@ -42,25 +42,25 @@ class ResNetBackboneNet(nn.Module):
             layers.append(block(self.inplanes, planes))
         return nn.Sequential(*layers)
 
-    def forward(self, x): # x.shape [32, 3, 256, 256]
+    def forward(self, x): # x.shape [bs, 3, 256, 256]
         if self.freeze:
             with torch.no_grad():
-                x = self.conv1(x)   # x.shape [32, 64, 128, 128]
+                x = self.conv1(x)   # x.shape [bs, 64, 128, 128]
                 x = self.bn1(x)
                 x = self.relu(x)
-                x_low_feature = self.maxpool(x)  # x.shape [32, 64, 64, 64]
-                x = self.layer1(x_low_feature)   # x.shape [32, 256, 64, 64]
-                x = self.layer2(x)  # x.shape [32, 512, 32, 32]
-                x = self.layer3(x)  # x.shape [32, 1024, 16, 16]
-                x_high_feature = self.layer4(x)  # x.shape [32, 2048, 8, 8]
+                x_low_feature = self.maxpool(x)  # x.shape [bs, 64, 64, 64]
+                x = self.layer1(x_low_feature)   # x.shape [bs, 256, 64, 64]
+                x = self.layer2(x)  # x.shape [bs, 512, 32, 32]
+                x = self.layer3(x)  # x.shape [bs, 1024, 16, 16]
+                x_high_feature = self.layer4(x)  # x.shape [bs, 2048, 8, 8]
                 return x_high_feature.detach()
         else:
-            x = self.conv1(x)   # x.shape [32, 64, 128, 128]
+            x = self.conv1(x)   # x.shape [bs, 64, 128, 128]
             x = self.bn1(x)
             x = self.relu(x)
-            x_low_feature = self.maxpool(x) # x.shape [32, 64, 64, 64]
-            x = self.layer1(x_low_feature)  # x.shape [32, 256, 64, 64]
-            x = self.layer2(x)  # x.shape [32, 512, 32, 32]
-            x = self.layer3(x)  # x.shape [32, 1024, 16, 16]
-            x_high_feature = self.layer4(x)  # x.shape [32, 2048, 8, 8]
+            x_low_feature = self.maxpool(x) # x.shape [bs, 64, 64, 64]
+            x = self.layer1(x_low_feature)  # x.shape [bs, 256, 64, 64]
+            x = self.layer2(x)  # x.shape [bs, 512, 32, 32]
+            x = self.layer3(x)  # x.shape [bs, 1024, 16, 16]
+            x_high_feature = self.layer4(x)  # x.shape [bs, 2048, 8, 8]
             return x_high_feature
