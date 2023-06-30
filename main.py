@@ -19,7 +19,7 @@ import json
 
 matplotlib.use('Agg')
 
-dataset_dir = '/data2/llq/distri/matrix_fisher/datasets' # TODO change with dataset path
+dataset_dir = '../datasets' # TODO change with dataset path
 
 # Specification
 resnet_spec = {18: (BasicBlock, [2, 2, 2, 2], [64, 64, 128, 256, 512], 'resnet18'),
