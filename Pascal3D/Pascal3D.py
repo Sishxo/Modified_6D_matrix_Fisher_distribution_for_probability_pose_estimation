@@ -515,7 +515,7 @@ class Pascal3D():
         self.image_out_size = image_size
         self.voc_train = voc_train
         if dataset_location==None:
-            dataset_location = '/data2/llq/distri/matrix_fisher/datasets'
+            dataset_location = '../datasets'
         self.location = os.path.join(dataset_location, DATASET_FOLDER_NAME)
         print("Location of pascal datasets is: ", self.location)
         if not os.path.exists(self.location):

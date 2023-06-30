@@ -31,7 +31,7 @@ import json
 
 matplotlib.use('Agg')
 
-dataset_dir = '/data2/llq/distri/matrix_fisher/datasets' # TODO change with dataset path
+dataset_dir = '../datasets' # TODO change with dataset path
 
 # Specification
 resnet_spec = {18: (BasicBlock, [2, 2, 2, 2], [64, 64, 128, 256, 512], 'resnet18'),
@@ -147,11 +147,12 @@ def train_model(loss_func, out_dim, train_setting):
             R_new = R_new.view(1, 3, 3).repeat(batch_size, 1, 1) 
             
             losses, Rest = total_loss(batch_size, out_F, R_new, R, f_green_R, f_red_R, p_green_R, p_red_R)
-            print("losses = ", losses)
-            print("Rest = ", Rest)
+            #print("losses = ", losses)
+            #print("Rest = ", Rest)
             
             if losses is not None:
-                loss = torch.mean(losses)
+                loss = torch.mean(losses).requires_grad_()
+                print(loss)
                 loss.backward()
                 opt.zero_grad()
                 opt.step()
@@ -235,7 +236,7 @@ def get_pascal_loaders(batch_size, train_all, use_synthetic_data, use_augment, v
             num_workers=8,
             worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2**32)),
             pin_memory=True,
-            drop_last=False)
+            drop_last=True)
         return dataloader_train, dataloader_eval
 
 def get_pascal_synthetic(batch_size, train_all, use_augmentation, voc_train):
