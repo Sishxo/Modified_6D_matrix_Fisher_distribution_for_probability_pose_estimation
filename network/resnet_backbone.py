@@ -6,7 +6,6 @@ https://github.com/LZGMatrix/CDPN_ICCV2019_ZhigangLi
 import torch.nn as nn
 import torch
 
-
 class ResNetBackboneNet(nn.Module):
     def __init__(self, block, layers, in_channel=3, freeze=False):
         self.freeze = freeze

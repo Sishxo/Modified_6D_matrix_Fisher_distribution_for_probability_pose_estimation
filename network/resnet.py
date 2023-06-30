@@ -8,6 +8,17 @@ try:
 except ImportError:
     from torch.utils.model_zoo import load_url as load_state_dict_from_url
 
+import sys
+import os
+import numpy as np
+root_path = os.path.abspath(__file__)
+root_path = '/'.join(root_path.split('/')[:-2])
+sys.path.append(root_path)
+from Pascal3D import Pascal3D
+from absl import app
+    
+dataset_dir = '/data2/llq/distri/matrix_fisher/datasets/'
+
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152', 'resnext50_32x4d', 'resnext101_32x8d',
@@ -221,39 +232,6 @@ class ResNet(nn.Module):
     def forward(self, x):
         return self._forward_impl(x)
 
-
-class ResnetHead(nn.Module):
-    def __init__(self, base, n_classes, embedding_dim, num_hidden_nodes, n_out):
-        super().__init__()
-        self.base = base
-        if embedding_dim == 0:
-            self.class_embedding = None
-        else:
-            self.class_embedding = nn.Embedding(n_classes, embedding_dim)
-        self.head = nn.Sequential(
-            nn.Linear(self.base.output_size+embedding_dim, num_hidden_nodes),
-            nn.BatchNorm1d(num_hidden_nodes),
-            nn.LeakyReLU(),
-            nn.Linear(num_hidden_nodes, num_hidden_nodes),
-            nn.BatchNorm1d(num_hidden_nodes), # num_hidden_nodes=512
-            nn.LeakyReLU(),
-            nn.Linear(num_hidden_nodes, n_out)
-        )
-
-    def forward(self, im, class_idx):
-        latent_space = self.base(im)
-        if self.class_embedding is None:
-            return self.head(latent_space)
-        else:
-            class_feature = self.class_embedding(class_idx)
-            conc = torch.cat([latent_space, class_feature], dim=1)
-            # print("resnet101 = ", latent_space.shape)
-            # print("class_feature = ", class_feature.shape)
-            # print("conc.shape = ", conc.shape)
-            #input()
-            return self.head(conc)
-
-
 def _resnet(arch, block, layers, pretrained, progress, **kwargs):
     model = ResNet(block, layers, **kwargs)
     if pretrained:
@@ -374,3 +352,76 @@ def wide_resnet101_2(pretrained=False, progress=True, **kwargs):
     kwargs['width_per_group'] = 64 * 2
     return _resnet('wide_resnet101_2', Bottleneck, [3, 4, 23, 3],
                    pretrained, progress, **kwargs)
+    
+
+class ResnetHead(nn.Module):
+    def __init__(self, base, n_classes, embedding_dim, num_hidden_nodes, n_out):
+        super().__init__()
+        self.base = base
+        if embedding_dim == 0:
+            self.class_embedding = None
+        else:
+            self.class_embedding = nn.Embedding(n_classes, embedding_dim)
+        self.head = nn.Sequential(
+            nn.Linear(self.base.output_size+embedding_dim, num_hidden_nodes),
+            nn.BatchNorm1d(num_hidden_nodes),
+            nn.LeakyReLU(),
+            nn.Linear(num_hidden_nodes, num_hidden_nodes),
+            nn.BatchNorm1d(num_hidden_nodes), # num_hidden_nodes=512
+            nn.LeakyReLU(),
+            nn.Linear(num_hidden_nodes, n_out)
+        )
+
+    def forward(self, im, class_idx):
+        latent_space = self.base(im) # latent_space = [bs, 2048]
+        if self.class_embedding is None:
+            return self.head(latent_space)
+        else:
+            class_feature = self.class_embedding(class_idx) # class_feature = [bs, 32]
+            conc = torch.cat([latent_space, class_feature], dim=1) # conc = [bs, 2080]
+            input()
+            return self.head(conc)
+
+
+def get_pascal_no_warp_loaders(batch_size, train_all, voc_train):
+    dataset = Pascal3D.Pascal3D(dataset_dir, train_all=train_all, use_warp=False, voc_train=voc_train)
+    dataloader_train = torch.utils.data.DataLoader(
+        dataset.get_train(False),
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=8,
+        worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2**32)),
+        pin_memory=True,
+        drop_last=True)
+    dataloader_eval = torch.utils.data.DataLoader(
+        dataset.get_eval(),
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=8,
+        worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2**32)),
+        pin_memory=True,
+        drop_last=True)
+    return dataloader_train, dataloader_eval
+
+def main(argv):     
+    num_classes=13
+    embedding_dim=32
+    num_hidden_nodes=512
+    base = resnet101(pretrained=True, progress=True)
+    out_dim = 9
+    
+    batch_size = 32
+    train_all = True
+    voc_train = False
+    dataloader_train, dataloader_eval = get_pascal_no_warp_loaders(batch_size, train_all, voc_train)
+    
+    for image, extrinsic, class_idx_cpu, hard, _, _ in dataloader_train:
+        im = image  # im.shape [bs, 3, 224, 224]
+        class_idx=class_idx_cpu
+        break
+    
+    model = ResnetHead(base, num_classes, embedding_dim, num_hidden_nodes, out_dim)
+    feature = model.forward(im, class_idx)
+    
+if __name__ == "__main__":
+    app.run(main)

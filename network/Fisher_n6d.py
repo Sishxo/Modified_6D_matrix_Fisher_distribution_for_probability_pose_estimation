@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 from torchvision import transforms
 import torch
 from Pascal3D import Pascal3D
+from UPNA import UPNA
 
 import torch.nn.functional as F
 
@@ -29,12 +30,9 @@ sys.path.append(root_path)
 
 from network.resnet import resnet50, resnet101, ResnetHead
 from network.resnet_backbone import ResNetBackboneNet
-from network.resnet_rot_head import RotHeadNet
-#from network.PoseR import Rot_red, Rot_green
+from network.rot_head import RotHeadNet
 
-#dataset_dir = '/data0/sunshichu/projects/Modified_6D_matrix_Fisher_distribution_for_probability_pose_estimation/datasets'
 dataset_dir = '/data2/llq/distri/matrix_fisher/datasets/'
-
 
 # Specification
 resnet_spec = {18: (BasicBlock, [2, 2, 2, 2], [64, 64, 128, 256, 512], 'resnet18'),
@@ -60,30 +58,60 @@ def get_pascal_no_warp_loaders(batch_size, train_all, voc_train):
         num_workers=8,
         worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2**32)),
         pin_memory=True,
-        drop_last=False)
+        drop_last=True)
     return dataloader_train, dataloader_eval
 
 class Fisher_n6d(nn.Module):
-    def __init__(self, backbone, rot_head_net):
+    def __init__(self, backbone, rot_head_net, n_classes, embedding_dim, num_hidden_nodes):
         super(Fisher_n6d, self).__init__()
-        self.base = resnet101()
         self.backbone = backbone
         self.rot_head = rot_head_net
+        
+        if embedding_dim == 0:
+            self.class_embedding = None
+        else:
+            self.class_embedding = nn.Embedding(n_classes, embedding_dim)
+        self.head = nn.Sequential(
+            #nn.Linear(self.backbone.output_size+embedding_dim, num_hidden_nodes),
+            nn.Linear(512+embedding_dim, num_hidden_nodes),
+            nn.BatchNorm1d(num_hidden_nodes),
+            nn.LeakyReLU(),
+            nn.Linear(num_hidden_nodes, num_hidden_nodes),
+            nn.BatchNorm1d(num_hidden_nodes),
+            nn.LeakyReLU(),
+            nn.Linear(num_hidden_nodes, num_hidden_nodes))
 
-    def forward(self, im):
-        feat = self.backbone(im) # feat = [bs, 2048, 8, 8], actually [bs, 512, 7, 7]
+    def forward(self, im, class_idx):
+        latent_space = self.backbone(im) # [bs, 2048, 7, 7]
+        latent_space = latent_space.flatten(2).mean(dim=-1) # [bs, 2048]
+        
+        self.class_embedding = None
+        
+        if self.class_embedding is None:
+            feat = self.head(latent_space)
+        else:
+            class_feature = self.class_embedding(class_idx) # class_feature = [bs, 32]
+            conc = torch.cat([latent_space, class_feature], dim=1) # [bs, 2080]
+            feat = self.head(conc)  
+        print("feat = ", feat.shape)
+              
+        # feat = net_F = [bs, 9]
+            
         # 6d normal vectors
-        net_F, green_R_vec, red_R_vec = self.rot_head(feat)  # green_R_vec = [bs, 4]
+        net_F, green_R_vec, red_R_vec = self.rot_head(latent_space)  # green_R_vec = [bs, 4]
         # normalization: green_R_normalized = [bs, 3]
         p_green_R = green_R_vec[:, 1:] / (torch.norm(green_R_vec[:, 1:], dim=1, keepdim=True) + 1e-6) 
         p_red_R = red_R_vec[:, 1:] / (torch.norm(red_R_vec[:, 1:], dim=1, keepdim=True) + 1e-6)
         # sigmoid for confidence
         f_green_R = torch.sigmoid(green_R_vec[:, 0]) # f_green_R = [bs]
         f_red_R = torch.sigmoid(red_R_vec[:, 0])
-        return net_F, p_green_R, p_red_R, f_green_R, f_red_R
+        return feat, net_F, p_green_R, p_red_R, f_green_R, f_red_R
     
-def main(argv):            
-    arch = 'resnet'
+def main(argv):     
+    num_classes=13
+    embedding_dim=32
+    num_hidden_nodes=512
+           
     back_freeze = False
     back_input_channel = 3 # # channels of backbone's input
     back_layers_num = 101   # 18 | 34 | 50 | 101 | 152
@@ -106,7 +134,6 @@ def main(argv):
         break
     # print("im = ", im.shape) # actually [bs, 3, 224, 224]
     
-    base = resnet101()
     block_type, layers, in_channels, name = resnet_spec[back_layers_num]
     backbone = ResNetBackboneNet(block_type, layers, back_input_channel, back_freeze)
     feature = backbone.forward(im)  # features = [bs, 512, 7, 7]
@@ -115,14 +142,14 @@ def main(argv):
     rot_head_net = RotHeadNet(in_channels[-1], rot_layers_num, rot_filters_num, 
                               rot_conv_kernel_size, rot_output_conv_kernel_size,
                               rot_output_channels, rot_head_freeze)
-    net_F, rot_green, rot_red = rot_head_net.forward(feature) # rot_green = [bs, 4, 56, 56]
+    net_F, rot_green, rot_red = rot_head_net.forward(feature) # rot_green = [bs, 4]
     # print("rotation head green = ", rot_green.shape)
 
-    model = Fisher_n6d(backbone, rot_head_net)
-    net_F, p_green_R, p_red_R, f_green_R, f_red_R = model.forward(im)
-    # print("green vector = ", p_green_R.shape) # p_green_R = [bs, 3, 56, 56]
-    # print("green confidence = ", f_green_R.shape) # f_green_R = [bs, 56, 56]
-    # print("net_F = ", net_F.shape)
+    model = Fisher_n6d(backbone, rot_head_net, num_classes, embedding_dim, num_hidden_nodes)
+    feat, net_F, p_green_R, p_red_R, f_green_R, f_red_R = model.forward(im, class_idx)
+    # print("green vector = ", p_green_R.shape) # p_green_R = [bs, 3]
+    # print("green confidence = ", f_green_R.shape) # f_green_R = [bs]
+    # print("net_F = ", net_F.shape) # net_F = [bs, 9]
 
 if __name__ == "__main__":
     app.run(main)

@@ -11,7 +11,8 @@ import torch
 
 import matplotlib.pyplot as plt
 
-PREPREPROCESSED_DIR = 'upna_preprocessed'
+#PREPREPROCESSED_DIR = 'upna_preprocessed'
+PREPREPROCESSED_DIR = 'Head_Pose_Database_UPNA'
 RAW_DIR = 'UPNA/Head_Pose_Database_UPNA'
 
 # duplicated code Pascal3d
@@ -270,6 +271,7 @@ class UPNA():
             create_preprocessed_dir(dataset_raw, self.dataset_preprocessed)
         train_users = ['User_01', 'User_02', 'User_03', 'User_04', 'User_05', 'User_06']
         val_users = ['User_07', 'User_08', 'User_09', 'User_10']
+        
         def get_samples_for_users(base_folder, users):
             ret = []
             for user in users:
@@ -278,8 +280,10 @@ class UPNA():
                     if filename[-4:] == '.png':
                         ret.append((user, filename[6:-4]))
             return ret
+        
         self.train_samples = sorted(get_samples_for_users(self.dataset_preprocessed, train_users))
         self.val_samples = sorted(get_samples_for_users(self.dataset_preprocessed, val_users))
+        
         def get_calibration(base_folder):
             mat_data = scipy.io.loadmat(os.path.join(self.dataset_preprocessed, 'Camera_parameters.mat'))
             ret = {} # maybe not the prettiest

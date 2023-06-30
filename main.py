@@ -1,28 +1,16 @@
-#test by Luo
-import matplotlib.pyplot as plt
-import torch.nn as nn
+import torch
+from torchvision.models.resnet import model_urls, BasicBlock, Bottleneck
 import numpy as np
-import tqdm
 from Pascal3D import Pascal3D, Pascal3D_render, Pascal3D_all
 from ModelNetSo3 import ModelNetSo3
-import math
-import torch.nn.functional as F
+from UPNA import UPNA
 
 from network.Fisher_n6d import Fisher_n6d
 from network.resnet_backbone import ResNetBackboneNet
-from network.resnet_rot_head import RotHeadNet
-from network.resnet import resnet50, resnet101, ResnetHead
-from network.PoseR import Rot_red, Rot_green
+from fisher_n6d.network.rot_head import RotHeadNet
 
-#from network.misc import transform_pts_batch
+from loss import total_loss, get_vertical_rot_vec, get_rot_mat_y_first
 
-from UPNA import UPNA
-import loss
-import torch
-from torchvision.models.resnet import model_urls, BasicBlock, Bottleneck
-
-import os
-import tqdm
 import argparse
 import dataloader_utils
 import logger
@@ -40,17 +28,23 @@ resnet_spec = {18: (BasicBlock, [2, 2, 2, 2], [64, 64, 128, 256, 512], 'resnet18
                101: (Bottleneck, [3, 4, 23, 3], [64, 256, 512, 1024, 2048], 'resnet101'),
                152: (Bottleneck, [3, 8, 36, 3], [64, 256, 512, 1024, 2048], 'resnet152')}
 
-def train_model(loss_func, out_dim, train_setting):
-    # device = 'cpu'
+def train_model(loss_func, train_setting):
     device = 'cuda'
     batch_size = 32
     train_all = True # train_all=False when decisions were made
     config = train_setting.config
     run_name = train_setting.run_name
-    base = resnet101(pretrained=True, progress=True)
+    num_hidden_nodes = 512
+    
+    if config.type == 'pascal':
+        num_classes=12+1 # +1 due to one indexed classes
+    elif config.type == 'modelnet':
+        num_classes=10
+    elif config.type == 'upna':
+        num_classes=1
     
     back_freeze = False
-    back_input_channel = 3 # # channels of backbone's input
+    back_input_channel = 3 # channels of backbone's input
     back_layers_num = 101   # 18 | 34 | 50 | 101 | 152
     
     rot_layers_num = 3
@@ -65,15 +59,9 @@ def train_model(loss_func, out_dim, train_setting):
     rot_head_net = RotHeadNet(in_channels[-1], rot_layers_num, rot_filters_num, 
                               rot_conv_kernel_size, rot_output_conv_kernel_size,
                               rot_output_channels, rot_head_freeze)
-    model = Fisher_n6d(backbone, rot_head_net)
-    model.to(device)
     
-    if config.type == 'pascal':
-        num_classes=12+1 # +1 due to one indexed classes
-    elif config.type == 'modelnet':
-        num_classes=10
-    elif config.type == 'upna':
-        num_classes=1
+    model = Fisher_n6d(backbone, rot_head_net, num_classes, config.embedding_dim, num_hidden_nodes)
+    model.to(device)
         
     if config.type == 'pascal':
         use_synthetic_data = config.synthetic_data
@@ -93,11 +81,10 @@ def train_model(loss_func, out_dim, train_setting):
     else:
         raise Exception("Unknown config: {}".config.format())
 
-    # if model.class_embedding is None:
-    #     finetune_parameters = model.head.parameters()
-    # else:
-    #     finetune_parameters = list(model.head.parameters()) + list(model.class_embedding.parameters())
-    finetune_parameters = model.parameters()
+    if model.class_embedding is None:
+        finetune_parameters = model.parameters()
+    else:
+        finetune_parameters = list(model.parameters()) + list(model.class_embedding.parameters())
 
     if config.type == 'modelnet':
         num_epochs = 50
@@ -135,7 +122,7 @@ def train_model(loss_func, out_dim, train_setting):
             R = extrinsic[:, :3,:3].to(device)
             class_idx = class_idx_cpu.to(device)
             
-            out_F, p_green_R, p_red_R, f_green_R, f_red_R = model(image)
+            feat, out_F, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
             
             for i in range(batch_size):
                 # p_green_R_new = [3], R_new = [3, 3]
@@ -144,14 +131,16 @@ def train_model(loss_func, out_dim, train_setting):
                                                                   p_green_R[i, ...],  
                                                                   p_red_R[i, ...]) 
                 R_new = get_rot_mat_y_first(p_red_R_new.view(1, -1), p_green_R_new.view(1, -1))[0]           
+            
+            p_green_R_new = p_green_R_new.view(1, 3).repeat(batch_size, 1) 
+            p_red_R_new = p_red_R_new.view(1, 3).repeat(batch_size, 1) 
             R_new = R_new.view(1, 3, 3).repeat(batch_size, 1, 1) 
             
-            losses, Rest = total_loss(batch_size, out_F, R_new, R, f_green_R, f_red_R, p_green_R, p_red_R)
-            print("losses = ", losses)
-            print("Rest = ", Rest)
+            losses, Rest = total_loss(batch_size, feat, R_new, R, f_green_R, f_red_R, p_green_R, p_red_R)
+            #losses, Rest = total_loss(batch_size, out_F, R_new, R, f_green_R, f_red_R, p_green_R, p_red_R)
             
             if losses is not None:
-                loss = torch.mean(losses)
+                loss = torch.mean(losses).requires_grad_()
                 loss.backward()
                 opt.zero_grad()
                 opt.step()
@@ -175,7 +164,7 @@ def train_model(loss_func, out_dim, train_setting):
                 R = extrinsic[:,:3,:3].to(device)
                 class_idx = class_idx_cpu.to(device)
                      
-                out_F, p_green_R, p_red_R, f_green_R, f_red_R = model(image)
+                feat, out_F, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
                 
                 for i in range(batch_size):
                     # p_green_R_new = [3], R_new = [3, 3]
@@ -184,6 +173,9 @@ def train_model(loss_func, out_dim, train_setting):
                                                                       p_green_R[i, ...],  
                                                                       p_red_R[i, ...]) 
                     R_new = get_rot_mat_y_first(p_red_R_new.view(1, -1), p_green_R_new.view(1, -1))[0]
+
+                p_green_R_new = p_green_R_new.view(1, 3).repeat(batch_size, 1) 
+                p_red_R_new = p_red_R_new.view(1, 3).repeat(batch_size, 1) 
                 R_new = R_new.view(1, 3, 3).repeat(batch_size, 1, 1) 
                 
                 losses, Rest = total_loss(batch_size, out_F, R_new, R, f_green_R, f_red_R, p_green_R, p_red_R)
@@ -212,7 +204,7 @@ def get_pascal_no_warp_loaders(batch_size, train_all, voc_train):
         num_workers=8,
         worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2**32)),
         pin_memory=True,
-        drop_last=False)
+        drop_last=True)
     return dataloader_train, dataloader_eval
 
 def get_pascal_loaders(batch_size, train_all, use_synthetic_data, use_augment, voc_train):
@@ -235,7 +227,7 @@ def get_pascal_loaders(batch_size, train_all, use_synthetic_data, use_augment, v
             num_workers=8,
             worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2**32)),
             pin_memory=True,
-            drop_last=False)
+            drop_last=True)
         return dataloader_train, dataloader_eval
 
 def get_pascal_synthetic(batch_size, train_all, use_augmentation, voc_train):
@@ -263,11 +255,11 @@ def get_pascal_synthetic(batch_size, train_all, use_augmentation, voc_train):
         num_workers=8,
         worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2**32)),
         pin_memory=True,
-        drop_last=False)
+        drop_last=True)
     return dataloader_train, dataloader_eval
 
 def get_upna_loaders(batch_size, train_all):
-    dataset = UPNA.n      (dataset_dir)
+    dataset = UPNA.UPNA(dataset_dir)
     train_ds = dataset.get_train()
     dataloader_train = torch.utils.data.DataLoader(
         dataset.get_train(),
@@ -285,7 +277,7 @@ def get_upna_loaders(batch_size, train_all):
         num_workers=8,
         worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2**32)),
         pin_memory=True,
-        drop_last=False)
+        drop_last=True)
     return dataloader_train, dataloader_eval
 
 def get_modelnet_loaders(batch_size, train_all):
@@ -305,7 +297,7 @@ def get_modelnet_loaders(batch_size, train_all):
         num_workers=0, # I suspect the suprocess fails to free their transactions when terminating? not too much processing done in dataloader anyways
         worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2**32)),
         pin_memory=True,
-        drop_last=False)
+        drop_last=True)
     return dataloader_train, dataloader_eval
 
 class TrainSetting():
@@ -399,7 +391,7 @@ class UPNAConfig(TrainConfig):
 
 def parse_config():
     arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument('--run_name', type=str, default='dummy')
+    arg_parser.add_argument('--run_name', type=str, default='upna')
     arg_parser.add_argument('--config_file', type=str)
     args = arg_parser.parse_args()
     run_name = args.run_name
@@ -413,162 +405,10 @@ def parse_config():
     training_setting = TrainSetting(run_name, config)
     return training_setting
 
-
-def total_loss(batch_size, out_F, R_new, R, f_green_R, f_red_R, p_green_R, p_red_R):
-    lambda1 = 1.0
-    lambda2 = 1.0
-    lambda3 = 1.0
-    
-    loss_vmf, Rest = vmf_loss(out_F, R_new, R, overreg=1.025)   
-    
-    #loss_rot_conf = loss_R_con(batch_size, f_green_R, f_red_R, p_green_R, p_red_R, R)        
-    #loss_normal = normal_loss(batch_size, f_green_R, f_red_R, p_green_R, p_red_R, R)
-    #loss_pm = point_matching_loss(points, f_green_R, f_red_R, p_green_R, p_red_R, R)
-    
-    #losses =  loss_vmf + lambda1 * loss_rot_conf + lambda2 * loss_normal + lambda3 * loss_pm
-    #losses =  loss_vmf + lambda1 * loss_rot_conf + lambda2 * loss_normal
-    losses =  loss_vmf 
-    return losses, Rest
-
-def vmf_loss(net_F, R_new, R, overreg=1.05):
-    F = net_F.view(-1,3,3)
-    loss_v = loss.KL_Fisher(F, R, overreg=overreg)
-    if loss_v is None:
-        R_new = torch.unsqueeze(torch.eye(3,3, device=R_new.device, dtype=R_new.dtype), 0)
-        R_new = torch.repeat_interleave(R_new, R.shape[0], 0)
-        return None, R_new
-    R_new = loss.batch_torch_F_to_R(F)
-    return loss_v, R_new
-
-# def vmf_loss(net_F, R, overreg=1.05):
-#     A = net_F.view(-1,3,3)
-#     loss_v = loss.KL_Fisher(A, R, overreg=overreg)
-#     if loss_v is None:
-#         Rest = torch.unsqueeze(torch.eye(3,3, device=R.device, dtype=R.dtype), 0)
-#         Rest = torch.repeat_interleave(Rest, R.shape[0], 0)
-#         return None, Rest
-#     Rest = loss.batch_torch_F_to_R(A)
-#     return loss_v, Rest
-
-def loss_R_con(batch_size, f_green_R, f_red_R, p_green_R, p_red_R, Rs):
-    k1 = 13.7
-    gt_green_R, gt_red_R = get_gt_v(batch_size, Rs, axis=2) # Rs=[bs, 3, 3] 
-    
-    dis_green = p_green_R - gt_green_R   # bs x 3
-    dis_green_norm = torch.norm(dis_green, dim=-1)   # bs
-    p_green_con_gt = torch.exp(-k1 * dis_green_norm * dis_green_norm)  # bs
-    res_green = nn.L1Loss(p_green_con_gt, f_green_R) # p_green_con_gt=[bs], f_green_R=[bs]
-    
-    # res_red = 0.0
-    # bs = p_green_R.shape[0]
-    # for i in range(bs):
-    #     dis_red = p_red_R[i, ...] - gt_red_R[i, ...]
-    #     dis_red_norm = torch.norm(dis_red)   # 1
-    #     p_red_con_gt = torch.exp(-k1 * dis_red_norm * dis_red_norm)
-    #     res_red += nn.L1Loss(p_red_con_gt, f_red_R[i])
-    # res_red = res_red / bs
-    
-    dis_red = p_red_R - gt_red_R   # bs x 3
-    dis_red_norm = torch.norm(dis_red, dim=-1)   # bs
-    p_red_con_gt = torch.exp(-k1 * dis_red_norm * dis_red_norm)  # bs
-    res_red = nn.L1Loss(p_red_con_gt, f_red_R) # p_red_con_gt=[bs], f_red_R=[bs]
-    
-    return res_green + res_red
-
-def normal_loss(batch_size, f_green_R, f_red_R, p_green_R, p_red_R, Rs):
-    gt_green_R, gt_red_R = get_gt_v(batch_size, Rs, axis=2) # gt_green_R, gt_red_R = [bs, 3]
-
-    for i in range(batch_size):
-        p_green_R_new, p_red_R_new = get_vertical_rot_vec(f_green_R[i], 
-                                                          f_red_R[i], 
-                                                          p_green_R[i, ...],  
-                                                          p_red_R[i, ...]) 
-    p_green_R_new = p_green_R_new.view(1, 3).repeat(batch_size, 1) # p_green_R_new = [bs, 3]
-    p_red_R_new = p_red_R_new.view(1, 3).repeat(batch_size, 1) # p_red_R_new = [bs, 3]  
-    
-    loss_n = nn.L1Loss(p_green_R_new, gt_green_R) + nn.L1Loss(p_red_R_new, gt_red_R)
-    return loss_n
-
-# def point_matching_loss(points, f_green_R, f_red_R, p_green_R, p_red_R, Rs):
-    
-#     p_green_R_new, p_red_R_new = get_vertical_rot_vec(f_green_R, f_red_R, p_green_R, p_red_R)  
-#     Rest = get_rot_mat_y_first(p_red_R_new, p_green_R_new)
-    
-#     points_est = transform_pts_batch(points, Rest, t=None)
-#     points_tgt = transform_pts_batch(points, Rs, t=None)
-    
-#     weights = 1.0
-#     pm_loss = nn.L1Loss(weights * points_est, weights * points_tgt)
-#     return pm_loss
-    
-def get_vertical_rot_vec(c1, c2, y, z):
-    ##  c1, c2 are weights
-    ##  y, x are rotation vectors
-    y = y.view(-1) # bs * dim
-    z = z.view(-1)
-    
-    rot_x = torch.cross(y, z)
-    rot_x = rot_x / (torch.norm(rot_x) + 1e-8)
-    # cal angle between y and z
-    y_z_cos = torch.sum(y * z)
-    y_z_theta = torch.acos(y_z_cos)
-    theta_2 = c1 / (c1 + c2) * (y_z_theta - math.pi / 2)
-    theta_1 = c2 / (c1 + c2) * (y_z_theta - math.pi / 2)
-    # first rotate y
-    c = torch.cos(theta_1)
-    s = torch.sin(theta_1)
-    rotmat_y = torch.tensor([[rot_x[0]*rot_x[0]*(1-c)+c, rot_x[0]*rot_x[1]*(1-c)-rot_x[2]*s, rot_x[0]*rot_x[2]*(1-c)+rot_x[1]*s],
-                            [rot_x[1]*rot_x[0]*(1-c)+rot_x[2]*s, rot_x[1]*rot_x[1]*(1-c)+c, rot_x[1]*rot_x[2]*(1-c)-rot_x[0]*s],
-                            [rot_x[0]*rot_x[2]*(1-c)-rot_x[1]*s, rot_x[2]*rot_x[1]*(1-c)+rot_x[0]*s, rot_x[2]*rot_x[2]*(1-c)+c]]).to(y.device)
-    new_y = torch.mm(rotmat_y, y.view(-1, 1))
-    # then rotate z
-    c = torch.cos(-theta_2)
-    s = torch.sin(-theta_2)
-    rotmat_z = torch.tensor([[rot_x[0] * rot_x[0] * (1 - c) + c, rot_x[0] * rot_x[1] * (1 - c) - rot_x[2] * s,
-                            rot_x[0] * rot_x[2] * (1 - c) + rot_x[1] * s],
-                            [rot_x[1] * rot_x[0] * (1 - c) + rot_x[2] * s, rot_x[1] * rot_x[1] * (1 - c) + c,
-                            rot_x[1] * rot_x[2] * (1 - c) - rot_x[0] * s],
-                            [rot_x[0] * rot_x[2] * (1 - c) - rot_x[1] * s,
-                            rot_x[2] * rot_x[1] * (1 - c) + rot_x[0] * s, rot_x[2] * rot_x[2] * (1 - c) + c]]).to(z.device)
-    new_z = torch.mm(rotmat_z, z.view(-1, 1))
-    return new_y.view(-1), new_z.view(-1)
-
-def get_rot_mat_y_first(y, x):
-    # poses
-    y = F.normalize(y, p=2, dim=-1)  # bx3
-    z = torch.cross(x, y, dim=-1)  # bx3
-    z = F.normalize(z, p=2, dim=-1)  # bx3
-    x = torch.cross(y, z, dim=-1)  # bx3
-    # (*,3)x3 --> (*,3,3)
-    return torch.stack((x, y, z), dim=-1)  # (b,3,3)
-
-def get_gt_v(batch_size, Rs, axis=2):
-    bs = batch_size  # Rs = bs x 3 x 3
-    #Rs = Rs.view(1, 3, 3).repeat(bs, 1, 1) 
-    #print("Rs in get_gt_v() = ", Rs.shape)
-    # TODO use 3 axis, the order remains: do we need to change order?
-    # if axis == 3:
-    #     corners = torch.tensor([[0, 0, 1], [0, 1, 0], [1, 0, 0]], dtype=torch.float).to(Rs.device)
-    #     corners = corners.view(1, 3, 3).repeat(bs, 1, 1)  # bs x 3 x 3
-    #     gt_vec = torch.bmm(Rs, corners).transpose(2, 1).reshape(bs, -1)
-    # else:
-    #     assert axis == 2
-    
-    corners = torch.tensor([[0, 0, 1], [0, 1, 0], [0, 0, 0]], dtype=torch.float).to(Rs.device) # corners = [3, 3]
-    # print("corners = ", corners.shape)
-    corners = corners.view(1, 3, 3).repeat(bs, 1, 1)  # bs x 3 x 3
-    # print("corners viewed = ", corners.shape)
-    
-    gt_vec = torch.bmm(Rs, corners).transpose(2, 1).reshape(bs, -1) # gt_vec = [bs, 9]
-    gt_green = gt_vec[:, 3:6] # gt_green = [bs, 3]
-    gt_red = gt_vec[:, (6, 7, 8)] # gt_red = [bs, 3]
-    return gt_green, gt_red
-
-
 import shutil
 def main():
     train_setting = parse_config()
-    train_model(total_loss, 17, train_setting)
+    train_model(total_loss, train_setting)
 
 if __name__ == '__main__':
     main()
