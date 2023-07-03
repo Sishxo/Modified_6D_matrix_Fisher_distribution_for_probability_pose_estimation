@@ -1,12 +1,14 @@
 import torch
 from torchvision.models.resnet import model_urls, BasicBlock, Bottleneck
 import numpy as np
+import torch.nn as nn
 from Pascal3D import Pascal3D, Pascal3D_render, Pascal3D_all
 from ModelNetSo3 import ModelNetSo3
 from UPNA import UPNA
 
 from network.Fisher_n6d import Fisher_n6d
-from network.resnet_backbone import ResNetBackboneNet
+from network.resnet import resnet50, resnet101, ResnetHead # original
+from network.resnet_backbone import ResNetBackboneNet # from epro-pnp
 from fisher_n6d.network.rot_head import RotHeadNet
 
 from loss import total_loss, get_vertical_rot_vec, get_rot_mat_y_first
@@ -19,7 +21,7 @@ import json
 
 matplotlib.use('Agg')
 
-dataset_dir = '../datasets' # TODO change with dataset path
+dataset_dir = '/data2/llq/distri/matrix_fisher/datasets' # TODO change with dataset path
 
 # Specification
 resnet_spec = {18: (BasicBlock, [2, 2, 2, 2], [64, 64, 128, 256, 512], 'resnet18'),
@@ -35,6 +37,7 @@ def train_model(loss_func, train_setting):
     config = train_setting.config
     run_name = train_setting.run_name
     num_hidden_nodes = 512
+    out_dim = 9
     
     if config.type == 'pascal':
         num_classes=12+1 # +1 due to one indexed classes
@@ -51,16 +54,19 @@ def train_model(loss_func, train_setting):
     rot_filters_num = 256 
     rot_conv_kernel_size = 3 
     rot_output_conv_kernel_size = 1
-    rot_output_channels = 17 
+    rot_output_channels = 8 
     rot_head_freeze = True
     
     block_type, layers, in_channels, name = resnet_spec[back_layers_num]
-    backbone = ResNetBackboneNet(block_type, layers, back_input_channel, back_freeze)
+    
+    base = resnet101(pretrained=True, progress=True)
+    backbone = ResnetHead(base, num_classes, config.embedding_dim, num_hidden_nodes, out_dim)
+    # backbone = ResNetBackboneNet(block_type, layers, back_input_channel, back_freeze)
     rot_head_net = RotHeadNet(in_channels[-1], rot_layers_num, rot_filters_num, 
                               rot_conv_kernel_size, rot_output_conv_kernel_size,
                               rot_output_channels, rot_head_freeze)
     
-    model = Fisher_n6d(backbone, rot_head_net, num_classes, config.embedding_dim, num_hidden_nodes)
+    model = Fisher_n6d(batch_size, rot_head_net, num_classes, config.embedding_dim, num_hidden_nodes)
     model.to(device)
         
     if config.type == 'pascal':
@@ -80,11 +86,18 @@ def train_model(loss_func, train_setting):
         dataloader_train, dataloader_eval = get_upna_loaders(batch_size, train_all)
     else:
         raise Exception("Unknown config: {}".config.format())
-
-    if model.class_embedding is None:
+    
+    if config.embedding_dim == 0:
+        class_embedding = None
         finetune_parameters = model.parameters()
     else:
-        finetune_parameters = list(model.parameters()) + list(model.class_embedding.parameters())
+        class_embedding = nn.Embedding(num_classes, config.embedding_dim)
+        finetune_parameters = list(model.parameters()) + list(class_embedding.parameters())
+
+    # if class_embedding is None:
+    #     finetune_parameters = model.parameters()
+    # else:
+    #     finetune_parameters = list(model.head.parameters()) + list(class_embedding.parameters())
 
     if config.type == 'modelnet':
         num_epochs = 50
@@ -122,7 +135,7 @@ def train_model(loss_func, train_setting):
             R = extrinsic[:, :3,:3].to(device)
             class_idx = class_idx_cpu.to(device)
             
-            feat, out_F, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
+            out_F, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
             
             for i in range(batch_size):
                 # p_green_R_new = [3], R_new = [3, 3]
@@ -136,8 +149,8 @@ def train_model(loss_func, train_setting):
             p_red_R_new = p_red_R_new.view(1, 3).repeat(batch_size, 1) 
             R_new = R_new.view(1, 3, 3).repeat(batch_size, 1, 1) 
             
-            losses, Rest = total_loss(batch_size, feat, R_new, R, f_green_R, f_red_R, p_green_R, p_red_R)
-            #losses, Rest = total_loss(batch_size, out_F, R_new, R, f_green_R, f_red_R, p_green_R, p_red_R)
+            #losses, Rest = total_loss(batch_size, feat, R_new, R, f_green_R, f_red_R, p_green_R, p_red_R)
+            losses, Rest = total_loss(batch_size, out_F, R_new, R, f_green_R, f_red_R, p_green_R, p_red_R)
             
             if losses is not None:
                 loss = torch.mean(losses).requires_grad_()
@@ -164,7 +177,7 @@ def train_model(loss_func, train_setting):
                 R = extrinsic[:,:3,:3].to(device)
                 class_idx = class_idx_cpu.to(device)
                      
-                feat, out_F, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
+                out_F, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
                 
                 for i in range(batch_size):
                     # p_green_R_new = [3], R_new = [3, 3]

@@ -231,6 +231,7 @@ class ResNet(nn.Module):
 
     def forward(self, x):
         return self._forward_impl(x)
+    
 
 def _resnet(arch, block, layers, pretrained, progress, **kwargs):
     model = ResNet(block, layers, **kwargs)
@@ -354,7 +355,36 @@ def wide_resnet101_2(pretrained=False, progress=True, **kwargs):
                    pretrained, progress, **kwargs)
     
 
-class ResnetHead(nn.Module):
+# class ResnetHead(nn.Module): # from FisherMatrix
+#     def __init__(self, base, n_classes, embedding_dim, num_hidden_nodes, n_out):
+#         super().__init__()
+#         self.base = base
+#         if embedding_dim == 0:
+#             self.class_embedding = None
+#         else:
+#             self.class_embedding = nn.Embedding(n_classes, embedding_dim)
+#         self.head = nn.Sequential(
+#             nn.Linear(self.base.output_size+embedding_dim, num_hidden_nodes),
+#             nn.BatchNorm1d(num_hidden_nodes),
+#             nn.LeakyReLU(),
+#             nn.Linear(num_hidden_nodes, num_hidden_nodes),
+#             nn.BatchNorm1d(num_hidden_nodes), # num_hidden_nodes=512
+#             nn.LeakyReLU(),
+#             nn.Linear(num_hidden_nodes, n_out) # self.head() = [bs, n_out]
+#         )
+
+#     def forward(self, im, class_idx):
+#         print("base = ", self.base.shape)
+#         latent_space = self.base(im) # latent_space = [bs, 2048]
+#         if self.class_embedding is None:
+#             return self.head(latent_space)
+#         else:
+#             class_feature = self.class_embedding(class_idx) # class_feature = [bs, 32]
+#             conc = torch.cat([latent_space, class_feature], dim=1) # conc = [bs, 2080]
+#             return self.head(conc)
+        
+        
+class ResnetHead(nn.Module): # from FisherMatrix
     def __init__(self, base, n_classes, embedding_dim, num_hidden_nodes, n_out):
         super().__init__()
         self.base = base
@@ -369,7 +399,7 @@ class ResnetHead(nn.Module):
             nn.Linear(num_hidden_nodes, num_hidden_nodes),
             nn.BatchNorm1d(num_hidden_nodes), # num_hidden_nodes=512
             nn.LeakyReLU(),
-            nn.Linear(num_hidden_nodes, n_out)
+            nn.Linear(num_hidden_nodes, n_out) # self.head() = [bs, n_out]
         )
 
     def forward(self, im, class_idx):
@@ -379,8 +409,7 @@ class ResnetHead(nn.Module):
         else:
             class_feature = self.class_embedding(class_idx) # class_feature = [bs, 32]
             conc = torch.cat([latent_space, class_feature], dim=1) # conc = [bs, 2080]
-            input()
-            return self.head(conc)
+            return latent_space, self.head(conc)
 
 
 def get_pascal_no_warp_loaders(batch_size, train_all, voc_train):

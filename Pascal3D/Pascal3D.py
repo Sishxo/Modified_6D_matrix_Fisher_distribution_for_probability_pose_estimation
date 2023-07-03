@@ -18,8 +18,6 @@ DATASET_FOLDER_NAME = 'Pascal3d'
 JSON_ANNOTATION_FOLDER_NAME = 'json_annotation'
 TMP_ZIP_NAME = 'tmp.zip'
 
-
-
 #format
 #data['record']: {
 #   'filename': string, filename

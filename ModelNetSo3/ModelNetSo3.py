@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from enum import IntEnum
 
-dataset_dir = 'dataset' # change to where you store datasets
+dataset_dir = '/data2/llq/distri/matrix_fisher/datasets' # change to where you store datasets
 
 test_name = 'test_20V.Rawjpg.lmdb'
 train_name = 'train_100V.Rawjpg.lmdb'
@@ -103,8 +103,6 @@ class ModelNetSo3Subset():
                               [0,0,1]])
         extrinsic=extrinsic.astype(np.float32)
         return image, extrinsic, class_idx, 0, intrinsic, 0
-
-
 
 
 def main():

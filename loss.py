@@ -329,13 +329,12 @@ def total_loss(batch_size, out_F, R_new, R, f_green_R, f_red_R, p_green_R, p_red
     lambda3 = 1.0
     
     loss_vmf, Rest = vmf_loss(out_F, R_new, R, overreg=1.025)  
-    
     loss_rot_conf = loss_R_con(batch_size, f_green_R, f_red_R, p_green_R, p_red_R, R)        
     loss_normal = normal_loss(batch_size, f_green_R, f_red_R, p_green_R, p_red_R, R)
     #loss_pm = point_matching_loss(points, f_green_R, f_red_R, p_green_R, p_red_R, R)
     
-    #losses =  loss_vmf + lambda1 * loss_rot_conf + lambda2 * loss_normal + lambda3 * loss_pm
-    losses =  loss_vmf
+    losses =  loss_vmf + lambda1 * loss_rot_conf + lambda2 * loss_normal 
+    # + lambda3 * loss_pm
     return losses, Rest
 
 # replace the predicted R version

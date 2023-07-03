@@ -14,7 +14,7 @@ class RotHeadNet(nn.Module):
                  num_filters=256, 
                  kernel_size=3, 
                  output_kernel_size=1,
-                 output_dim=17, 
+                 output_dim=8, 
                  freeze=False):
         super(RotHeadNet, self).__init__()
         self.freeze = freeze
@@ -69,19 +69,21 @@ class RotHeadNet(nn.Module):
             with torch.no_grad():
                 for i, l in enumerate(self.features):
                     x = l(x)
-                net_F, green_R_vec, red_R_vec = self.out_layer(x).split([9, 4, 4], dim=1) # green_R_vec = [bs, 4, 56, 56]
+                #net_F, green_R_vec, red_R_vec = self.out_layer(x).split([9, 4, 4], dim=1) # green_R_vec = [bs, 4, 56, 56]
+                green_R_vec, red_R_vec = self.out_layer(x).split([4, 4], dim=1) # green_R_vec = [bs, 4, 56, 56]
                 green_R_vec = green_R_vec.flatten(2).mean(dim=-1) # [bs, 4]
                 red_R_vec = red_R_vec.flatten(2).mean(dim=-1) # [bs, 4]
-                net_F = net_F.flatten(2).mean(dim=-1) # [bs, 9]
+                #net_F = net_F.flatten(2).mean(dim=-1) # [bs, 9]
                 #scale = self.scale_branch(x.flatten(2).mean(dim=-1)).exp()
-                return net_F.detach(), green_R_vec.detach(), red_R_vec.detach()
+                return green_R_vec.detach(), red_R_vec.detach()
         else:
             for i, l in enumerate(self.features):
                 x = l(x)
-            net_F, green_R_vec, red_R_vec = self.out_layer(x).split([9, 4, 4], dim=1)
+            #net_F, green_R_vec, red_R_vec = self.out_layer(x).split([9, 4, 4], dim=1)
+            green_R_vec, red_R_vec = self.out_layer(x).split([4, 4], dim=1)
             green_R_vec = green_R_vec.flatten(2).mean(dim=-1) # [bs, 4]
             red_R_vec = red_R_vec.flatten(2).mean(dim=-1) # [bs, 4]
-            net_F = net_F.flatten(2).mean(dim=-1) # [bs, 9]
+            #net_F = net_F.flatten(2).mean(dim=-1) # [bs, 9]
             #scale = self.scale_branch(x.flatten(2).mean(dim=-1)).exp()
-            return net_F, green_R_vec, red_R_vec
+            return green_R_vec, red_R_vec
 
