@@ -30,11 +30,10 @@ def vmf_loss(net_out, R, overreg=1.05):
     return loss_v, Rest
 
 def reconstruct_R9d(R6d):
-    matrix_2x3 = np.reshape(R6d, (3, 2))
-    matrix_3x3 = np.hstack((matrix_2x3, np.cross(matrix_2x3[:, 0], matrix_2x3[:, 1])[:, np.newaxis]))
-    q, _ = np.linalg.qr(matrix_3x3)
-    vector_9d = np.reshape(q, 9)
-    
+    matrix_2x3 = R6d.view(R6d.size(0),3,2)
+    matrix_3x3 = torch.cat((matrix_2x3, torch.cross(matrix_2x3[:, :, 0], matrix_2x3[:, :, 1]).unsqueeze(2)),dim=2)
+    q, _ = torch.linalg.qr(matrix_3x3)
+    vector_9d = q.reshape(q.size(0),9)
     return vector_9d
 
 def get_pascal_no_warp_loaders(batch_size, train_all, voc_train):
@@ -235,7 +234,7 @@ def train_model(loss_func, out_dim, train_setting):
                 opt.step()
             else:
                 losses = torch.zeros(R.shape[0], dtype=R.dtype, device=R.device)
-            logger_train.add_samples(image, losses, out.view(-1,3,3), R, Rest, class_idx_cpu, hard)
+            logger_train.add_samples(image, losses, out_9d.view(-1,3,3), R, Rest, class_idx_cpu, hard)
         logger_train.finish()
         logger_train = None
         image=None
@@ -254,10 +253,10 @@ def train_model(loss_func, out_dim, train_setting):
                 class_idx = class_idx_cpu.to(device)
                 out = model(image, class_idx)
                 out_9d=reconstruct_R9d(out)
-                losses, Rest = loss_func(out, R)
+                losses, Rest = loss_func(out_9d, R)
                 if losses is None:
                     losses = torch.zeros(R.shape[0], dtype=R.dtype, device=R.device)
-                logger_eval.add_samples(image, losses, out.view(-1,3,3), R, Rest, class_idx_cpu, hard)
+                logger_eval.add_samples(image, losses, out_9d.view(-1,3,3), R, Rest, class_idx_cpu, hard)
         logger_eval.finish()
         if verbose:
             loggers.save_network(epoch, model)
