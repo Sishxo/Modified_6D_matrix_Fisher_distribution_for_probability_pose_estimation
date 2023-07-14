@@ -14,6 +14,8 @@ import dataloader_utils
 import logger
 import matplotlib
 import json
+from datetime import datetime
+import pytz
 matplotlib.use('Agg')
 
 dataset_dir = 'datasets' # TODO change with dataset path
@@ -28,13 +30,6 @@ def vmf_loss(net_out, R, overreg=1.05):
 
     Rest = loss.batch_torch_A_to_R(A)
     return loss_v, Rest
-
-def reconstruct_R9d(R6d):
-    matrix_2x3 = R6d.view(R6d.size(0),3,2)
-    matrix_3x3 = torch.cat((matrix_2x3, torch.cross(matrix_2x3[:, :, 0], matrix_2x3[:, :, 1]).unsqueeze(2)),dim=2)
-    q, _ = torch.linalg.qr(matrix_3x3)
-    vector_9d = q.reshape(q.size(0),9)
-    return vector_9d
 
 def get_pascal_no_warp_loaders(batch_size, train_all, voc_train):
     dataset = Pascal3D.Pascal3D(dataset_dir, train_all=train_all, use_warp=False, voc_train=voc_train)
@@ -224,8 +219,7 @@ def train_model(loss_func, out_dim, train_setting):
             R = extrinsic[:, :3,:3].to(device)
             class_idx = class_idx_cpu.to(device)
             out = model(image, class_idx)
-            out_9d=reconstruct_R9d(out)
-            losses, Rest = loss_func(out_9d, R, overreg=1.025)
+            losses, Rest = loss_func(out, R, overreg=1.025)
 
             if losses is not None:
                 loss = torch.mean(losses)
@@ -234,7 +228,7 @@ def train_model(loss_func, out_dim, train_setting):
                 opt.step()
             else:
                 losses = torch.zeros(R.shape[0], dtype=R.dtype, device=R.device)
-            logger_train.add_samples(image, losses, out_9d.view(-1,3,3), R, Rest, class_idx_cpu, hard)
+            logger_train.add_samples(image, losses, out.view(-1,3,3), R, Rest, class_idx_cpu, hard)
         logger_train.finish()
         logger_train = None
         image=None
@@ -252,11 +246,10 @@ def train_model(loss_func, out_dim, train_setting):
                 R = extrinsic[:,:3,:3].to(device)
                 class_idx = class_idx_cpu.to(device)
                 out = model(image, class_idx)
-                out_9d=reconstruct_R9d(out)
-                losses, Rest = loss_func(out_9d, R)
+                losses, Rest = loss_func(out, R)
                 if losses is None:
                     losses = torch.zeros(R.shape[0], dtype=R.dtype, device=R.device)
-                logger_eval.add_samples(image, losses, out_9d.view(-1,3,3), R, Rest, class_idx_cpu, hard)
+                logger_eval.add_samples(image, losses, out.view(-1,3,3), R, Rest, class_idx_cpu, hard)
         logger_eval.finish()
         if verbose:
             loggers.save_network(epoch, model)
@@ -349,15 +342,25 @@ class UPNAConfig(TrainConfig):
 
     def json_serialize(self):
         return {'type': 'upna'}
+    
+def get_time():
+    timezone = pytz.timezone('Asia/Shanghai')
+    current_time = datetime.now(timezone)
+    formatted_time = current_time.strftime("%Y_%m_%d_%H_%M")
+    return formatted_time
 
 def parse_config():
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument('--run_name', type=str, default='dummy')
     arg_parser.add_argument('--config_file', type=str)
     args = arg_parser.parse_args()
-    run_name = args.run_name
+    current_time=get_time()
+    if args.run_name=='dummy':
+        run_name=os.path.splitext(os.path.basename(args.config_file))[0]+'_'+current_time
+    else:
+        run_name = args.run_name
     config_file = args.config_file
-    print(args.run_name,args.config_file)
+    print(run_name,args.config_file)
     with open(config_file, 'rb') as f:
         #json_bytes = f.read()
         #json_str = json_bytes.decode('utf-8')
@@ -372,7 +375,7 @@ def parse_config():
 import shutil
 def main():
     train_setting = parse_config()
-    train_model(vmf_loss, 6, train_setting)
+    train_model(vmf_loss, 9, train_setting)
 
 if __name__ == '__main__':
     main()
