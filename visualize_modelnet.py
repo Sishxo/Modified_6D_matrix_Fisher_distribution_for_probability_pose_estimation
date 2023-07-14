@@ -2,7 +2,7 @@ import numpy
 import matplotlib.pyplot as plt
 from ModelNetSo3 import ModelNetSo3
 import torch
-from resnet import resnet101, ResnetHead
+from network.resnet import resnet101, ResnetHead
 import logger
 import os
 import loss

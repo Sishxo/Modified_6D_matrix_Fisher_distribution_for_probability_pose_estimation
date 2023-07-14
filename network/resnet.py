@@ -222,15 +222,15 @@ class ResNet(nn.Module):
 
 
 class ResnetHead(nn.Module):
-    def __init__(self, base, n_classes, embedding_dim, num_hidden_nodes, n_out):
+    def __init__(self, output_size, n_classes, embedding_dim, num_hidden_nodes, n_out):
         super().__init__()
-        self.base = base
+        self.output_size = output_size
         if embedding_dim == 0:
             self.class_embedding = None
         else:
             self.class_embedding = nn.Embedding(n_classes, embedding_dim)
         self.head = nn.Sequential(
-            nn.Linear(self.base.output_size+embedding_dim, num_hidden_nodes),
+            nn.Linear(self.output_size+embedding_dim, num_hidden_nodes),
             nn.BatchNorm1d(num_hidden_nodes),
             nn.LeakyReLU(),
             nn.Linear(num_hidden_nodes, num_hidden_nodes),
@@ -239,8 +239,8 @@ class ResnetHead(nn.Module):
             nn.Linear(num_hidden_nodes, n_out)
         )
 
-    def forward(self, im, class_idx):
-        latent_space = self.base(im)
+    def forward(self, latent_space, class_idx):
+        latent_space = latent_space
         if self.class_embedding is None:
             return self.head(latent_space)
         else:

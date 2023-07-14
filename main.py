@@ -3,7 +3,9 @@ import numpy as np
 import tqdm
 from Pascal3D import Pascal3D, Pascal3D_render, Pascal3D_all
 from ModelNetSo3 import ModelNetSo3
-from resnet import resnet50, resnet101, ResnetHead
+from network.resnet import resnet50, resnet101, ResnetHead
+from network.Fisher_n6d import Fisher_n6d
+from network.rot_head import RotHeadNet
 from UPNA import UPNA
 import loss
 import torch
@@ -153,14 +155,18 @@ def train_model(loss_func, out_dim, train_setting):
     train_all = True # train_all=False when decisions were made
     config = train_setting.config
     run_name = train_setting.run_name
-    base = resnet101(pretrained=True, progress=True)
+    
     if config.type == 'pascal':
         num_classes=12+1 # +1 due to one indexed classes
     elif config.type == 'modelnet':
         num_classes=10
     elif config.type == 'upna':
         num_classes=1
-    model = ResnetHead(base, num_classes, config.embedding_dim, 512, out_dim)
+        
+    base = resnet101(pretrained=True, progress=True)    
+    fisher_head = ResnetHead(base.output_size, num_classes, config.embedding_dim, 512, out_dim)
+    #rot_head = RotHeadNet(base,)
+    model = Fisher_n6d(base,fisher_head)
     model.to(device)
 
     if config.type == 'pascal':
@@ -181,10 +187,10 @@ def train_model(loss_func, out_dim, train_setting):
     else:
         raise Exception("Unknown config: {}".config.format())
 
-    if model.class_embedding is None:
-        finetune_parameters = model.head.parameters()
+    if model.fisher_head.class_embedding is None:
+        finetune_parameters = model.fisher_head.head.parameters()
     else:
-        finetune_parameters = list(model.head.parameters()) + list(model.class_embedding.parameters())
+        finetune_parameters = list(model.fisher_head.head.parameters()) + list(model.fisher_head.class_embedding.parameters())
 
     if config.type == 'modelnet':
         num_epochs = 50

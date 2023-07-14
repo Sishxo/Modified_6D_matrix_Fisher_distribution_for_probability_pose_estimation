@@ -1,7 +1,7 @@
 import numpy
 import matplotlib.pyplot as plt
 import torch
-from resnet import resnet101, ResnetHead
+from network.resnet import resnet101, ResnetHead
 from Pascal3D import Pascal3D
 from ModelNetSo3 import ModelNetSo3
 import logger
