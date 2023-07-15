@@ -1,12 +1,12 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-import torch_math
-from np_math import numdiff
+import utils.torch_math
+from utils.np_math import numdiff
 
 from geometric_utils import torch_batch_quaternion_to_rot_mat, torch_batch_euler_to_rotation
 from geometric_utils import numpy_quaternion_to_rot_mat
-import torch_norm_factor
+import utils.torch_norm_factor as torch_norm_factor
 
 
 epsilon_log_hg = 1e-10

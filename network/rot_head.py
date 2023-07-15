@@ -51,6 +51,7 @@ class RotHeadNet(nn.Module):
             self.features.append(nn.ReLU(inplace=True))
 
         self.out_layer = nn.Conv2d(num_filters, output_dim, kernel_size=output_kernel_size, padding=pad, bias=True)
+        
         self.scale_branch = nn.Linear(256, 2)
 
         for m in self.modules():
@@ -67,8 +68,8 @@ class RotHeadNet(nn.Module):
     def forward(self, x):
         if self.freeze:
             with torch.no_grad():
-                for i, l in enumerate(self.features):
-                    x = l(x)
+                for i, layer in enumerate(self.features):
+                    x = layer(x)
                 #net_F, green_R_vec, red_R_vec = self.out_layer(x).split([9, 4, 4], dim=1) # green_R_vec = [bs, 4, 56, 56]
                 green_R_vec, red_R_vec = self.out_layer(x).split([4, 4], dim=1) # green_R_vec = [bs, 4, 56, 56]
                 green_R_vec = green_R_vec.flatten(2).mean(dim=-1) # [bs, 4]
@@ -77,8 +78,8 @@ class RotHeadNet(nn.Module):
                 #scale = self.scale_branch(x.flatten(2).mean(dim=-1)).exp()
                 return green_R_vec.detach(), red_R_vec.detach()
         else:
-            for i, l in enumerate(self.features):
-                x = l(x)
+            for i, layer in enumerate(self.features):
+                x = layer(x)
             #net_F, green_R_vec, red_R_vec = self.out_layer(x).split([9, 4, 4], dim=1)
             green_R_vec, red_R_vec = self.out_layer(x).split([4, 4], dim=1)
             green_R_vec = green_R_vec.flatten(2).mean(dim=-1) # [bs, 4]
