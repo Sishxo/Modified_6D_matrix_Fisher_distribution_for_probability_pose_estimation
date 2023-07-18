@@ -3,7 +3,7 @@ import os
 import io
 import pickle
 from PIL import Image
-from geometric_utils import numpy_euler_to_rotation, numpy_quaternion_to_rot_mat, numpy_aet_to_rot
+from utils.geometric_utils import numpy_euler_to_rotation, numpy_quaternion_to_rot_mat, numpy_aet_to_rot
 import numpy as np
 import matplotlib.pyplot as plt
 from enum import IntEnum

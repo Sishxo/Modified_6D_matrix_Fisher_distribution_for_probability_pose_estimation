@@ -7,33 +7,22 @@ from network.resnet import resnet50, resnet101, ResnetHead
 from network.Fisher_n6d import Fisher_n6d
 from network.rot_head import RotHeadNet
 from UPNA import UPNA
-import loss
+from loss import total_loss
 import torch
 import os
 import tqdm
 import argparse
-import dataloader_utils
+import utils.dataloader_utils as dataloader_utils
 import logger
 import matplotlib
 import json
 from datetime import datetime
 import pytz
+from utils.rot_utils import get_rot_vec_vert_batch
 
 matplotlib.use("Agg")
 
 dataset_dir = "datasets"  # TODO change with dataset path
-
-
-def vmf_loss(net_out, R, overreg=1.05):
-    A = net_out.view(-1, 3, 3)
-    loss_v = loss.KL_Fisher(A, R, overreg=overreg)
-    if loss_v is None:
-        Rest = torch.unsqueeze(torch.eye(3, 3, device=R.device, dtype=R.dtype), 0)
-        Rest = torch.repeat_interleave(Rest, R.shape[0], 0)
-        return None, Rest
-
-    Rest = loss.batch_torch_A_to_R(A)
-    return loss_v, Rest
 
 
 def get_pascal_no_warp_loaders(batch_size, train_all, voc_train):
@@ -282,11 +271,16 @@ def train_model(loss_func, out_dim, train_setting):
             image = image.to(device)
             R = extrinsic[:, :3, :3].to(device)
             class_idx = class_idx_cpu.to(device)
-            fisher_output, green_R_vec, red_R_vec = model(image, class_idx)
-            losses, Rest = loss_func(fisher_output, R, overreg=1.025)
+            
+            fisher_output, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
+            
+            R_6d_branch = get_rot_vec_vert_batch(f_green_R,f_red_R,p_green_R,p_red_R)
+
+            losses, Rest = loss_func(batch_size,fisher_output, R_6d_branch, R, f_green_R,f_red_R,p_green_R,p_red_R, overreg=1.025)
 
             if losses is not None:
                 loss = torch.mean(losses)
+                #print(loss)
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
@@ -311,8 +305,13 @@ def train_model(loss_func, out_dim, train_setting):
                 image = image.to(device)
                 R = extrinsic[:, :3, :3].to(device)
                 class_idx = class_idx_cpu.to(device)
-                fisher_output, green_R_vec, red_R_vec = model(image, class_idx)
-                losses, Rest = loss_func(fisher_output, R)
+                
+                fisher_output, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
+                
+                R_6d_branch = get_rot_vec_vert_batch(f_green_R,f_red_R,p_green_R,p_red_R)
+                
+                losses, Rest = loss_func(batch_size,fisher_output, R_6d_branch, R, f_green_R,f_red_R,p_green_R,p_red_R, overreg=1.025)
+                
                 if losses is None:
                     losses = torch.zeros(R.shape[0], dtype=R.dtype, device=R.device)
                 logger_eval.add_samples(
@@ -452,7 +451,7 @@ import shutil
 
 def main():
     train_setting = parse_config()
-    train_model(vmf_loss, 9, train_setting)
+    train_model(total_loss, 9, train_setting)
 
 
 if __name__ == "__main__":
