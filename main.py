@@ -223,8 +223,8 @@ def train_model(loss_func, out_dim, train_setting):
             image = image.to(device)
             R = extrinsic[:, :3,:3].to(device)
             class_idx = class_idx_cpu.to(device)
-            out = model(image, class_idx)
-            out_9d=reconstruct_R9d(out)
+            out_9d = model(image, class_idx)
+            #out_9d=reconstruct_R9d(out)
             losses, Rest = loss_func(out_9d, R, overreg=1.025)
 
             if losses is not None:
@@ -251,8 +251,8 @@ def train_model(loss_func, out_dim, train_setting):
                 image = image.to(device)
                 R = extrinsic[:,:3,:3].to(device)
                 class_idx = class_idx_cpu.to(device)
-                out = model(image, class_idx)
-                out_9d=reconstruct_R9d(out)
+                out_9d = model(image, class_idx)
+                #out_9d=reconstruct_R9d(out)
                 losses, Rest = loss_func(out_9d, R)
                 if losses is None:
                     losses = torch.zeros(R.shape[0], dtype=R.dtype, device=R.device)
@@ -372,7 +372,7 @@ def parse_config():
 import shutil
 def main():
     train_setting = parse_config()
-    train_model(vmf_loss, 6, train_setting)
+    train_model(vmf_loss, 9, train_setting)
 
 if __name__ == '__main__':
     main()
