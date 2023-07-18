@@ -273,10 +273,8 @@ def train_model(loss_func, out_dim, train_setting):
             class_idx = class_idx_cpu.to(device)
             
             fisher_output, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
-            
-            R_6d_branch = get_rot_vec_vert_batch(f_green_R,f_red_R,p_green_R,p_red_R)
 
-            losses, Rest = loss_func(batch_size,fisher_output, R_6d_branch, R, f_green_R,f_red_R,p_green_R,p_red_R, overreg=1.025)
+            losses, Rest = loss_func(batch_size,fisher_output, R, f_green_R,f_red_R,p_green_R,p_red_R, overreg=1.05)
 
             if losses is not None:
                 loss = torch.mean(losses)
@@ -308,9 +306,7 @@ def train_model(loss_func, out_dim, train_setting):
                 
                 fisher_output, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
                 
-                R_6d_branch = get_rot_vec_vert_batch(f_green_R,f_red_R,p_green_R,p_red_R)
-                
-                losses, Rest = loss_func(batch_size,fisher_output, R_6d_branch, R, f_green_R,f_red_R,p_green_R,p_red_R, overreg=1.025)
+                losses, Rest = loss_func(batch_size,fisher_output, R, f_green_R,f_red_R,p_green_R,p_red_R, overreg=1.05)
                 
                 if losses is None:
                     losses = torch.zeros(R.shape[0], dtype=R.dtype, device=R.device)

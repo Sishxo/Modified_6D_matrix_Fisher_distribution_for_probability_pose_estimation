@@ -7,7 +7,7 @@ from utils.np_math import numdiff
 from utils.geometric_utils import torch_batch_quaternion_to_rot_mat, torch_batch_euler_to_rotation
 from utils.geometric_utils import numpy_quaternion_to_rot_mat
 import utils.torch_norm_factor as torch_norm_factor
-from utils.rot_utils import get_gt_v
+from utils.rot_utils import get_gt_v,get_rot_vec_vert_batch
 
 
 
@@ -28,7 +28,9 @@ def rotation_confidence_loss(batch_size,f_green_R,f_red_R,p_green_R,p_red_R,Rs):
     p_red_con_gt = torch.exp(-k1 * dis_red_norm * dis_red_norm)  # bs
     res_red = L1loss(p_red_con_gt, f_red_R) # p_red_con_gt=[bs], f_red_R=[bs]
     
-    return res_green + res_red
+    R_6d_branch = get_rot_vec_vert_batch(f_green_R,f_red_R,p_green_R,p_red_R)
+    
+    return res_green + res_red,R_6d_branch
 
 def vmf_loss(net_out, R, overreg=1.05):
     A = net_out.view(-1, 3, 3)
@@ -41,12 +43,16 @@ def vmf_loss(net_out, R, overreg=1.05):
     Rest = batch_torch_A_to_R(A)
     return loss_v, Rest
 
-def total_loss(batch_size,fisher_output, R_6d_branch , R, f_green_R,f_red_R,p_green_R,p_red_R,overreg):
+def total_loss(batch_size,fisher_output, R, f_green_R,f_red_R,p_green_R,p_red_R,overreg):
     
     loss_vmf, R_est = vmf_loss(fisher_output, R, overreg=overreg)
-    loss_rot_conf = rotation_confidence_loss(batch_size,f_green_R,f_red_R,p_green_R,p_red_R,R)
+    loss_rot_conf, R_6d_branch = rotation_confidence_loss(batch_size,f_green_R,f_red_R,p_green_R,p_red_R,R)
     
-    losses = loss_vmf + loss_rot_conf
+    if loss_vmf is None:
+        losses = loss_rot_conf
+        R_est = R_6d_branch
+    else:
+        losses = loss_rot_conf+loss_vmf
     return losses,R_est
 
 def f_log_hg_torch_approx(S):
