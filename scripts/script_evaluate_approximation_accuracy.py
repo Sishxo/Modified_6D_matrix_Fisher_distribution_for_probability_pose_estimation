@@ -1,10 +1,10 @@
 import torch
 import numpy as np
 
-import torch_math
+import sys
+sys.path.append('..')
 
-import torch_norm_factor
-import np_math
+from utils import torch_math,torch_norm_factor,np_math
 
 
 def eval_approximation_accuracy():

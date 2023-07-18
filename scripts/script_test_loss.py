@@ -1,3 +1,6 @@
+import sys
+sys.path.append('..')
+
 import loss
 import numpy as np
 import torch
