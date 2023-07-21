@@ -233,9 +233,9 @@ def train_model(loss_func, out_dim, train_setting):
         raise Exception("Unknown config: {}".config.format())
 
     if model.fisher_head.class_embedding is None:
-        finetune_parameters = model.fisher_head.head.parameters()
+        finetune_parameters = model.parameters()
     else:
-        finetune_parameters = list(model.fisher_head.head.parameters()) + list(
+        finetune_parameters = list(model.parameters()) + list(
             model.fisher_head.class_embedding.parameters()
         )
 

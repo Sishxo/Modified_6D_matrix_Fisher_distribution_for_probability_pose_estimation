@@ -74,18 +74,6 @@ if __name__ == '__main__':
     g_R=torch.tensor([[0.3126, 0.0018, -0.9499],
             [0.7303, -0.6400, 0.2391],
             [-0.6074, -0.7684, -0.2014]], device='cuda:0')
-    y = g_R[:, 1]
-    x = g_R[:, 0]
-    c1 = 5
-    c2 = 1
-    y = y / torch.norm(y)
-    x = x / torch.norm(x)
-    L = torch.dot(y, x)
-    Lp = torch.cross(x, y)
-    Lp = Lp / torch.norm(Lp)
-    new_y, nnew_x = get_vertical_rot_vec(c1, c2, y, x)
-    M = torch.dot(new_y, nnew_x)
-    Mp = torch.cross(new_y, nnew_x)
-    Mp = Mp / torch.norm(Mp)
-    new_R = get_rot_mat_y_first(new_y.view(1, -1), nnew_x.view(1, -1))
-    print('OK')
+    
+    U,S,V = torch.svd(g_R)
+    print(U,S,V)
