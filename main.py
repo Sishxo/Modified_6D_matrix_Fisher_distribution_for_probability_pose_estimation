@@ -232,13 +232,11 @@ def train_model(loss_func, out_dim, train_setting):
     else:
         raise Exception("Unknown config: {}".config.format())
 
-    if model.fisher_head.class_embedding is None:
-        finetune_parameters = model.parameters()
-    else:
-        finetune_parameters = list(model.parameters()) + list(
-            model.fisher_head.class_embedding.parameters()
-        )
 
+    if model.fisher_head.class_embedding is None:
+        finetune_parameters = list(model.base_net.parameters())+list(model.fisher_head.parameters())+list(model.rot_head.parameters())
+    else:
+        finetune_parameters = list(model.base_net.parameters()) +list(model.fisher_head.head.parameters())+ list(model.fisher_head.class_embedding.parameters())+list(model.rot_head.parameters())
     if config.type == "modelnet":
         num_epochs = 50
         drop_epochs = [30, 40, 45, np.inf]
