@@ -7,13 +7,14 @@ class Fisher_n6d(nn.Module):
         super(Fisher_n6d, self).__init__()
         self.base_net = resnet_head
         self.fisher_head = fisher_head
-        self.rot_head = rot_head
+        #self.rot_head = rot_head
         self.batch_size = batch_size
 
     def forward(self, x, class_idx):
+        #print(x.shape)
         features = self.base_net(x)
         fisher_output = self.fisher_head(features, class_idx)
-        feat = features.view(self.batch_size, 32, 8, 8)  # feature=[bs, 32, 8, 8]
+        feat = features.view(x.shape[0], 32, 8, 8)  # feature=[bs, 32, 8, 8]
         feat = feat.repeat(1, 64, 1, 1)  # feature=[bs, 2048, 8, 8]
         # 6d normal vectors
         green_R_vec, red_R_vec = self.rot_head(feat)  # green_R_vec = [bs, 4]

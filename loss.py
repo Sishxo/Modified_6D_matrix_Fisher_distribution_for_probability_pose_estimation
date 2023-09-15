@@ -28,18 +28,23 @@ def rotation_confidence_loss(batch_size,f_green_R,f_red_R,p_green_R,p_red_R,Rs):
     p_red_con_gt = torch.exp(-k1 * dis_red_norm * dis_red_norm)  # bs
     res_red = L1loss(p_red_con_gt, f_red_R) # p_red_con_gt=[bs], f_red_R=[bs]
     
-    R_6d_branch = get_rot_vec_vert_batch(f_green_R,f_red_R,p_green_R,p_red_R)
+    _,_,_,R_6d_branch = get_rot_vec_vert_batch(f_green_R,f_red_R,p_green_R,p_red_R)
     
     return res_green + res_red,R_6d_branch
 
-def normal_loss(batch_size,f_green_R,f_red_R,p_green_R,p_red_R,Rs):
-    L1loss = torch.nn.L1Loss(reduction='mean')
-    gt_green_R, gt_red_R = get_gt_v(batch_size, Rs, axis=2) # Rs=[bs, 3, 3] 
-    return None
+# def normal_loss(batch_size,f_green_R,f_red_R,p_green_R,p_red_R,Rs):
+#     L1loss = torch.nn.L1Loss(reduction='mean')
+#     gt_green_R, gt_red_R = get_gt_v(batch_size, Rs, axis=2) # Rs=[bs, 3, 3] 
+    
+#     p_green_R_new,p_red_R_new,_,_ = get_rot_vec_vert_batch(f_green_R,f_red_R,p_green_R,p_red_R)
+    
+#     loss_n = L1loss(p_green_R_new, gt_green_R) + L1loss(p_red_R_new, gt_red_R)
+#     return loss_n
+    
 
-def vmf_loss(net_out, R, overreg=1.05):
+def vmf_loss(net_out, R, grids, overreg=1.05):
     A = net_out.view(-1, 3, 3)
-    loss_v = KL_Fisher(A, R, overreg=overreg)
+    loss_v = KL_Fisher(A, R, grids, overreg=overreg)
     if loss_v is None:
         Rest = torch.unsqueeze(torch.eye(3, 3, device=R.device, dtype=R.dtype), 0)
         Rest = torch.repeat_interleave(Rest, R.shape[0], 0)

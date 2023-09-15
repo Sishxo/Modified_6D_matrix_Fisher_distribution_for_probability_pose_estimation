@@ -7,8 +7,9 @@ from network.resnet import resnet50, resnet101, ResnetHead
 from network.Fisher_n6d import Fisher_n6d
 from network.rot_head import RotHeadNet
 from UPNA import UPNA
-from loss import total_loss
+from loss import total_loss,vmf_loss
 import torch
+import torch.nn as nn
 import os
 import tqdm
 import argparse
@@ -19,6 +20,8 @@ import json
 from datetime import datetime
 import pytz
 from utils.rot_utils import get_rot_vec_vert_batch
+import time
+from tqdm import tqdm
 
 matplotlib.use("Agg")
 
@@ -194,23 +197,32 @@ def train_model(loss_func, out_dim, train_setting):
     train_all = True  # train_all=False when decisions were made
     config = train_setting.config
     run_name = train_setting.run_name
+    gpus = train_setting.gpus
+    
+    os.environ["CUDA_VISIBLE_DEVICES"]=gpus
 
     if config.type == "pascal":
         num_classes = 12 + 1  # +1 due to one indexed classes
     elif config.type == "modelnet":
         num_classes = 10
-    elif config.type == "upna":
-        num_classes = 1
+    else:
+        raise ValueError
 
     base = resnet101(pretrained=True, progress=True)
     fisher_head = ResnetHead(
-        base.output_size, num_classes, config.embedding_dim, 512, out_dim
+        base, num_classes, config.embedding_dim, 512, out_dim
     )
-    rot_head = RotHeadNet(base.output_size)
-    model = Fisher_n6d(base, fisher_head, rot_head, batch_size)
+    #rot_head = RotHeadNet(base.output_size)
+    #model = Fisher_n6d(base, fisher_head, rot_head, batch_size)
+    model = fisher_head
+    
+    if torch.cuda.device_count()>1:
+        model=nn.DataParallel(model)
+    
     model.to(device)
-
+    
     if config.type == "pascal":
+        #print("pardon")
         use_synthetic_data = config.synthetic_data
         use_augmentation = config.data_aug
         use_warp = config.warp
@@ -233,10 +245,18 @@ def train_model(loss_func, out_dim, train_setting):
         raise Exception("Unknown config: {}".config.format())
 
 
-    if model.fisher_head.class_embedding is None:
-        finetune_parameters = list(model.base_net.parameters())+list(model.fisher_head.parameters())+list(model.rot_head.parameters())
+    if isinstance(model, nn.DataParallel):
+        if model.module.class_embedding:
+            finetune_parameters = list(model.module.head.parameters())+list(model.module.class_embedding.parameters()) 
+        else:
+            finetune_parameters = model.module.head.parameters()
     else:
-        finetune_parameters = list(model.base_net.parameters()) +list(model.fisher_head.head.parameters())+ list(model.fisher_head.class_embedding.parameters())+list(model.rot_head.parameters())
+        if model.class_embedding:
+            finetune_parameters = list(model.head.parameters())+list(model.class_embedding.parameters()) 
+        else:
+            finetune_parameters = model.head.parameters()
+            drop_idx
+        
     if config.type == "modelnet":
         num_epochs = 50
         drop_epochs = [30, 40, 45, np.inf]
@@ -246,33 +266,41 @@ def train_model(loss_func, out_dim, train_setting):
         drop_epochs = [30, 60, 90, np.inf]
         stop_finetune_epoch = 3
     drop_idx = 0
+    
+    grids_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'eq_grids', 'grids3.npy')
+    print(f'Loading SO3 discrete grids {grids_path}')
+    grids = torch.from_numpy(np.load(grids_path)).to(device)
 
     cur_lr = 0.01
-    opt = torch.optim.SGD(finetune_parameters, lr=cur_lr)
+    opt = torch.optim.Adam(finetune_parameters, lr=cur_lr)
     if config.type == "pascal":
         class_enum = Pascal3D.PascalClasses
     else:
         class_enum = ModelNetSo3.ModelNetSo3Classes
+        
     log_dir = "logs/{}/{}".format(config.type, run_name)
     loggers = logger.Logger(log_dir, class_enum, config=config)
+    
     for epoch in range(num_epochs):
+        read_data_start_time = time.time()
         verbose = epoch % 20 == 0 or epoch == num_epochs - 1
         if epoch == drop_epochs[drop_idx]:
             cur_lr *= 0.1
             drop_idx += 1
-            opt = torch.optim.SGD(model.parameters(), lr=cur_lr)
+            opt = torch.optim.Adam(model.parameters(), lr=cur_lr)
         elif epoch == stop_finetune_epoch:
-            opt = torch.optim.SGD(model.parameters(), lr=cur_lr)
+            opt = torch.optim.Adam(model.parameters(), lr=cur_lr)
         logger_train = loggers.get_train_logger(epoch, verbose)
         model.train()
-        for image, extrinsic, class_idx_cpu, hard, _, _ in dataloader_train:
+        for image, extrinsic, class_idx_cpu, hard, _, _ in tqdm(dataloader_train):
             image = image.to(device)
             R = extrinsic[:, :3, :3].to(device)
             class_idx = class_idx_cpu.to(device)
             
-            fisher_output, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
-
-            losses, Rest = loss_func(batch_size,fisher_output, R, f_green_R,f_red_R,p_green_R,p_red_R, overreg=1.05)
+            # fisher_output, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
+            out = model(image,class_idx)
+            # losses, Rest = loss_func(batch_size,fisher_output, R, f_green_R,f_red_R,p_green_R,p_red_R, overreg=1.05)
+            losses, Rest = vmf_loss(out,R,grids,overreg=1.025)
 
             if losses is not None:
                 loss = torch.mean(losses)
@@ -283,7 +311,7 @@ def train_model(loss_func, out_dim, train_setting):
             else:
                 losses = torch.zeros(R.shape[0], dtype=R.dtype, device=R.device)
             logger_train.add_samples(
-                image, losses, fisher_output.view(-1, 3, 3), R, Rest, class_idx_cpu, hard
+                image, losses, None, R, Rest, class_idx_cpu, hard
             )
         logger_train.finish()
         logger_train = None
@@ -297,38 +325,44 @@ def train_model(loss_func, out_dim, train_setting):
         logger_eval = loggers.get_validation_logger(epoch, verbose)
         model.eval()
         with torch.no_grad():
-            for image, extrinsic, class_idx_cpu, hard, _, _ in dataloader_eval:
+            for image, extrinsic, class_idx_cpu, hard, _, _ in tqdm(dataloader_eval):
                 image = image.to(device)
                 R = extrinsic[:, :3, :3].to(device)
                 class_idx = class_idx_cpu.to(device)
                 
-                fisher_output, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
-                
-                losses, Rest = loss_func(batch_size,fisher_output, R, f_green_R,f_red_R,p_green_R,p_red_R, overreg=1.05)
+                # fisher_output, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
+                out = model(image,class_idx)
+                # losses, Rest = loss_func(batch_size,fisher_output, R, f_green_R,f_red_R,p_green_R,p_red_R, overreg=1.05)
+                losses, Rest = vmf_loss(out,R, grids, overreg=1.025)
                 
                 if losses is None:
                     losses = torch.zeros(R.shape[0], dtype=R.dtype, device=R.device)
                 logger_eval.add_samples(
-                    image, losses, fisher_output.view(-1, 3, 3), R, Rest, class_idx_cpu, hard
+                    image, losses, None, R, Rest, class_idx_cpu, hard
                 )
         logger_eval.finish()
         if verbose:
             loggers.save_network(epoch, model)
+        
+        read_data_end_time = time.time()
+        print("cost time: "+str(read_data_end_time-read_data_start_time))
 
 
 class TrainSetting:
-    def __init__(self, run_name, config):
+    def __init__(self, run_name, config, gpus):
         self.run_name = run_name
         self.config = config
+        self.gpus = gpus
 
     def json_serialize(self):
-        return {"run_name": self.run_name, "config": self.config}
+        return {"run_name": self.run_name, "config": self.config, "gpus":self.gpus}
 
     @staticmethod
     def json_deserialize(dic):
         run_name = dic["run_name"]
         config = TrainConfig.json_deserialize(dic["config"])
-        return TrainSetting(run_name, config)
+        gpus = dic["gpus"]
+        return TrainSetting(run_name, config, gpus)
 
 
 class TrainConfig:
@@ -421,6 +455,7 @@ def parse_config():
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("--run_name", type=str, default="dummy")
     arg_parser.add_argument("--config_file", type=str)
+    arg_parser.add_argument("--gpus",type=str, default='')
     args = arg_parser.parse_args()
     current_time = get_time()
     if args.run_name == "dummy":
@@ -436,7 +471,9 @@ def parse_config():
         # json_str = json_bytes.decode('utf-8')
         config_dict = json.load(f)
     config = TrainConfig.json_deserialize(config_dict)
-    training_setting = TrainSetting(run_name, config)
+    #gpu_idx = args.gpus.split(',') if args.gpus else []
+    #gpu_idx = [int(gpu.strip()) for gpu in gpu_idx]
+    training_setting = TrainSetting(run_name, config, args.gpus)
     return training_setting
 
 

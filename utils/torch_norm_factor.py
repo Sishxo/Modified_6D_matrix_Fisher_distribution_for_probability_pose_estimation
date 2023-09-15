@@ -7,8 +7,10 @@ def _horner(arr, x):
         z.mul_(x).add_(arr[i])
     return z
 
+
 torch_bessel0_a  = [1.0, 3.5156229, 3.0899424, 1.2067492, 0.2659732, 0.360768e-1, 0.45813e-2][::-1]
 torch_bessel0_b  = [0.39894228, 0.1328592e-1, 0.225319e-2, -0.157565e-2, 0.916281e-2, -0.2057706e-1, 0.2635537e-1, -0.1647633e-1, 0.392377e-2][::-1]
+
 def bessel0(x): # always supressed by exp(x)
     # x is of size (-1)
     abs_x = torch.abs(x)

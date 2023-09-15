@@ -51,12 +51,13 @@ def get_rot_mat_y_first(y, x):
 
 def get_rot_vec_vert_batch(c1, c2, x, y):
     bs = c1.shape[0]
-    new_x = x
-    new_y = y
+    new_x = torch.zeroslike(x)
+    new_y = torch.zeroslike(y)
+    new_z = torch.zeroslike(x)
     new_R = torch.zeros((bs,3,3),dtype=torch.float32,device=x.device)
     for i in range(bs):
-        _,_,_,new_R[i,...] = get_vertical_rot_vec(c1[i, ...], c2[i, ...], x[i, ...], y[i, ...])
-    return new_R
+        new_x[i,...],new_y[i,...],new_z[i,...],new_R[i,...] = get_vertical_rot_vec(c1[i, ...], c2[i, ...], x[i, ...], y[i, ...])
+    return new_x,new_y,new_z,new_R
 
 def get_gt_v(batch_size, Rs, axis=2):
     bs = batch_size  # Rs = bs x 3 x 3
