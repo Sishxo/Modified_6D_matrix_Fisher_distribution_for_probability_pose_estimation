@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import utils.torch_math
 from utils.np_math import numdiff
+from utils.rot_6d_torch import torch_matrix_to_6d, torch_6d_to_matrix
 
 from utils.geometric_utils import (
     torch_batch_quaternion_to_rot_mat,
@@ -12,7 +13,7 @@ from utils.geometric_utils import numpy_quaternion_to_rot_mat
 import utils.torch_norm_factor as torch_norm_factor
 from utils.rot_utils import get_gt_v, get_rot_vec_vert_batch
 
-
+CPUSVD = True
 epsilon_log_hg = 1e-10
 
 # def rotation_confidence_loss(batch_size,f_green_R,f_red_R,p_green_R,p_red_R,Rs):
@@ -55,47 +56,74 @@ epsilon_log_hg = 1e-10
 #     else:
 #         losses = loss_rot_conf+loss_vmf
 #     return losses,R_est
-def trace_A_grid_R(A, R, type='grids'):
-    
-    if type=='grids':
+def trace_A_grid_R(A, R, grids, type="grids"):
+    if type == "grids":
+        delta_rot = torch.matmul(grids[-1].t(),R)
+        grids = torch.einsum('aij,bjk->baik',grids,delta_rot) # (batch_size, N, 3, 3)
+        # grids = grids.unsqueeze(0)  # (1, N, 3, 2)
+        grids = torch_matrix_to_6d(grids)
+        A = A.unsqueeze(1)  # (batch_size, 1, 3, 2)
         bs = A.shape[0]
-        N = R.shape[1]
-        trace = torch.matmul(A.view(bs, 1, 1, 9), R.view(1, N, 9, 1)).view(bs, N)
-    elif type =='gt' :
+        N = grids.shape[1]
+        trace = torch.matmul(A.view(bs, 1, 1, 6), grids.view(bs, N, 6, 1)).view(bs, N)
+    elif type == "gt":
+        R=torch_matrix_to_6d(R)
         bs = A.shape[0]
-        trace = torch.matmul(A.view(bs,1,9),R.view(bs,9,1)).view(bs) 
+        trace = torch.matmul(A.view(bs, 1, 6), R.view(bs, 6, 1)).view(bs)
     else:
         raise ValueError("wrong parameter for type")
 
     return trace
 
-def discrete_sampling_log_loss(A, R, grids, overreg):
-    grids = grids.unsqueeze(0)  # (1, N, 3, 3)
-    A = A.unsqueeze(1)  # (batch_size, 1, 3, 3)
 
-    sampling_trace= trace_A_grid_R(A, grids,"grids")
-    
+def batch_torch_A_to_R(A):
+    # A(batch,3,2)
+
+    A = torch_6d_to_matrix(A.view(-1, 6))
+
+    device = A.device
+    if CPUSVD:
+        A = A.cpu()
+    U, S, VT = torch.linalg.svd(A)
+    with torch.no_grad():  # sign can only change if the 3rd component of the svd is 0, then the sign does not matter
+        s3sign = torch.det(torch.matmul(U, VT))
+    U[:, :, 2] *= s3sign.view(-1, 1)
+    R = torch.matmul(U, VT)
+    R = R.to(device)
+    return R
+
+
+def discrete_sampling_log_loss(A, R, grids, overreg):
+    sampling_trace = trace_A_grid_R(A, R, grids, "grids")  # A(b,3,2)  grids(4096,3,2)
+
     # trick from rotation_laplace preventing numerical explosion
     max_trace = sampling_trace.max(dim=-1)[0]
-    exp_trace = torch.exp(sampling_trace-max_trace[:,None])
-    log_C_F = max_trace + torch.log(exp_trace.sum(1)*(1/grids.shape[1]))
-    
-    gt_trace = trace_A_grid_R(A,R,"gt")
-    
-    loss = overreg*log_C_F - gt_trace
-    
-    Rest = 
-    
-    
+    exp_trace = torch.exp(sampling_trace - max_trace[:, None])
+    log_C_F = max_trace + torch.log(exp_trace.sum(1) * (1 / grids.shape[0]))
+
+    gt_trace = trace_A_grid_R(A, R, grids, "gt")
+
+    loss = overreg * log_C_F - gt_trace
+
+    return loss
 
 
-def sampling_loss(net_out, R, grids, overreg=1.025):
-    A = net_out.view(-1, 3, 3)
+def sampling_loss_Rest(net_out, R, grids, overreg=1.025):
+    A = net_out.view(-1, 3, 2)
+    # print("grids shape: ",grids.shape)
+    # R = torch_matrix_to_6d(R)
+    # grids = torch_matrix_to_6d(grids)
+    
+    # A(bs,3,2) R(bs,3,3) grids(N,3,3)
     loss = discrete_sampling_log_loss(A, R, grids, overreg)
+    Rest = batch_torch_A_to_R(A)
+    return loss, Rest
 
 
-def vmf_loss(net_out, R, overreg=1.025):
-    A = net_out.view(-1, 3, 3)
+def vmf_loss(net_out, R, grids, overreg=1.025):
+    # A(b,3,2)  R(b,3,2)
+    A = net_out.view(-1, 3, 2)
+    R = torch_matrix_to_6d(R)
     loss_v = KL_Fisher(A, R, overreg=overreg)
     if loss_v is None:
         Rest = torch.unsqueeze(torch.eye(3, 3, device=R.device, dtype=R.dtype), 0)
@@ -320,14 +348,14 @@ def KL_Fisher(A, R, overreg=1.05):
     # R is bx3x3
     global _global_svd_fail_counter
     try:
-        U, S, V = torch.svd(A)
+        U, S, V = torch.svd(torch_6d_to_matrix(A.view(-1, 6)))
         with torch.no_grad():  # sign can only change if the 3rd component of the svd is 0, then the sign does not matter
             rotation_candidate = torch.matmul(U, V.transpose(1, 2))
             s3sign = torch.det(rotation_candidate)
         S_sign = S.clone()
         S_sign[:, 2] *= s3sign
         log_normalizer = torch_norm_factor.logC_F(S_sign)
-        log_exponent = -torch.matmul(A.view(-1, 1, 9), R.view(-1, 9, 1)).view(-1)
+        log_exponent = -torch.matmul(A.view(-1, 1, 6), R.view(-1, 6, 1)).view(-1)
         _global_svd_fail_counter = max(0, _global_svd_fail_counter - 1)
         return log_exponent + overreg * log_normalizer
     except RuntimeError as e:
@@ -385,13 +413,13 @@ def euler_loss(angles1, angles2):
     return torch.sum((angles1 - angles2) ** 2, dim=1), Rest
 
 
-def batch_torch_A_to_R(A):
-    U, S, V = torch.svd(A)
-    with torch.no_grad():  # sign can only change if the 3rd component of the svd is 0, then the sign does not matter
-        s3sign = torch.det(torch.matmul(U, V.transpose(1, 2)))
-    U[:, :, 2] *= s3sign.view(-1, 1)
-    R = torch.matmul(U, V.transpose(1, 2))
-    return R
+# def batch_torch_A_to_R(A):
+#     U, S, V = torch.svd(A)
+#     with torch.no_grad():  # sign can only change if the 3rd component of the svd is 0, then the sign does not matter
+#         s3sign = torch.det(torch.matmul(U, V.transpose(1, 2)))
+#     U[:, :, 2] *= s3sign.view(-1, 1)
+#     R = torch.matmul(U, V.transpose(1, 2))
+#     return R
 
 
 def angle_error(t_R1, t_R2):

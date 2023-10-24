@@ -7,7 +7,7 @@ from network.resnet import resnet50, resnet101, ResnetHead
 from network.Fisher_n6d import Fisher_n6d
 from network.rot_head import RotHeadNet
 from UPNA import UPNA
-from loss import total_loss,vmf_loss
+from loss import vmf_loss,sampling_loss_Rest
 import torch
 import torch.nn as nn
 import os
@@ -22,6 +22,7 @@ import pytz
 from utils.rot_utils import get_rot_vec_vert_batch
 import time
 from tqdm import tqdm
+import timm
 
 matplotlib.use("Agg")
 
@@ -36,7 +37,7 @@ def get_pascal_no_warp_loaders(batch_size, train_all, voc_train):
         dataset.get_train(False),
         batch_size=batch_size,
         shuffle=True,
-        num_workers=8,
+        num_workers=16,
         worker_init_fn=lambda _: np.random.seed(
             torch.utils.data.get_worker_info().seed % (2**32)
         ),
@@ -47,7 +48,7 @@ def get_pascal_no_warp_loaders(batch_size, train_all, voc_train):
         dataset.get_eval(),
         batch_size=batch_size,
         shuffle=False,
-        num_workers=8,
+        num_workers=16,
         worker_init_fn=lambda _: np.random.seed(
             torch.utils.data.get_worker_info().seed % (2**32)
         ),
@@ -70,7 +71,7 @@ def get_pascal_loaders(
             dataset.get_train(use_augment),
             batch_size=batch_size,
             shuffle=True,
-            num_workers=8,
+            num_workers=32,
             worker_init_fn=lambda _: np.random.seed(
                 torch.utils.data.get_worker_info().seed % (2**32)
             ),
@@ -81,7 +82,7 @@ def get_pascal_loaders(
             dataset.get_eval(),
             batch_size=batch_size,
             shuffle=False,
-            num_workers=8,
+            num_workers=32,
             worker_init_fn=lambda _: np.random.seed(
                 torch.utils.data.get_worker_info().seed % (2**32)
             ),
@@ -193,7 +194,7 @@ def get_modelnet_loaders(batch_size, train_all):
 def train_model(loss_func, out_dim, train_setting):
     # device = 'cpu'
     device = "cuda"
-    batch_size = 32
+    batch_size = train_setting.batch
     train_all = True  # train_all=False when decisions were made
     config = train_setting.config
     run_name = train_setting.run_name
@@ -208,7 +209,14 @@ def train_model(loss_func, out_dim, train_setting):
     else:
         raise ValueError
 
-    base = resnet101(pretrained=True, progress=True)
+    # base = resnet101(pretrained=True, progress=True)
+    base = timm.create_model(
+    'vit_base_patch16_224.augreg2_in21k_ft_in1k',
+    pretrained=True,
+    num_classes=0,  # remove classifier nn.Linear
+    pretrained_cfg_overlay=dict(file='/data0/sunshichu/.cache/huggingface/hub/models--timm--vit_base_patch16_224.augreg2_in21k_ft_in1k/pytorch_model.bin'),
+    )
+
     fisher_head = ResnetHead(
         base, num_classes, config.embedding_dim, 512, out_dim
     )
@@ -220,9 +228,9 @@ def train_model(loss_func, out_dim, train_setting):
         model=nn.DataParallel(model)
     
     model.to(device)
+
     
     if config.type == "pascal":
-        #print("pardon")
         use_synthetic_data = config.synthetic_data
         use_augmentation = config.data_aug
         use_warp = config.warp
@@ -272,7 +280,7 @@ def train_model(loss_func, out_dim, train_setting):
     grids = torch.from_numpy(np.load(grids_path)).to(device)
 
     cur_lr = 0.01
-    opt = torch.optim.Adam(finetune_parameters, lr=cur_lr)
+    opt = torch.optim.SGD(finetune_parameters, lr=cur_lr)
     if config.type == "pascal":
         class_enum = Pascal3D.PascalClasses
     else:
@@ -287,24 +295,24 @@ def train_model(loss_func, out_dim, train_setting):
         if epoch == drop_epochs[drop_idx]:
             cur_lr *= 0.1
             drop_idx += 1
-            opt = torch.optim.Adam(model.parameters(), lr=cur_lr)
+            opt = torch.optim.SGD(model.parameters(), lr=cur_lr)
         elif epoch == stop_finetune_epoch:
-            opt = torch.optim.Adam(model.parameters(), lr=cur_lr)
+            opt = torch.optim.SGD(model.parameters(), lr=cur_lr)
         logger_train = loggers.get_train_logger(epoch, verbose)
         model.train()
         for image, extrinsic, class_idx_cpu, hard, _, _ in tqdm(dataloader_train):
             image = image.to(device)
             R = extrinsic[:, :3, :3].to(device)
             class_idx = class_idx_cpu.to(device)
-            
+
             # fisher_output, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
             out = model(image,class_idx)
+            
             # losses, Rest = loss_func(batch_size,fisher_output, R, f_green_R,f_red_R,p_green_R,p_red_R, overreg=1.05)
-            losses, Rest = vmf_loss(out,R,grids,overreg=1.025)
-
+            losses, Rest = loss_func(out,R,grids,overreg=1.025)
+            
             if losses is not None:
                 loss = torch.mean(losses)
-                #print(loss)
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
@@ -333,7 +341,7 @@ def train_model(loss_func, out_dim, train_setting):
                 # fisher_output, p_green_R, p_red_R, f_green_R, f_red_R = model(image, class_idx)
                 out = model(image,class_idx)
                 # losses, Rest = loss_func(batch_size,fisher_output, R, f_green_R,f_red_R,p_green_R,p_red_R, overreg=1.05)
-                losses, Rest = vmf_loss(out, R, grids, overreg=1.025)
+                losses, Rest = loss_func(out, R, grids, overreg=1.025)
                 
                 if losses is None:
                     losses = torch.zeros(R.shape[0], dtype=R.dtype, device=R.device)
@@ -349,20 +357,22 @@ def train_model(loss_func, out_dim, train_setting):
 
 
 class TrainSetting:
-    def __init__(self, run_name, config, gpus):
+    def __init__(self, run_name, config, gpus, batch):
         self.run_name = run_name
         self.config = config
         self.gpus = gpus
+        self.batch = batch
 
     def json_serialize(self):
-        return {"run_name": self.run_name, "config": self.config, "gpus":self.gpus}
+        return {"run_name": self.run_name, "config": self.config, "gpus":self.gpus, "batch":self.batch}
 
     @staticmethod
     def json_deserialize(dic):
         run_name = dic["run_name"]
         config = TrainConfig.json_deserialize(dic["config"])
         gpus = dic["gpus"]
-        return TrainSetting(run_name, config, gpus)
+        batch = dic
+        return TrainSetting(run_name, config, gpus, batch)
 
 
 class TrainConfig:
@@ -456,6 +466,7 @@ def parse_config():
     arg_parser.add_argument("--run_name", type=str, default="dummy")
     arg_parser.add_argument("--config_file", type=str)
     arg_parser.add_argument("--gpus",type=str, default='')
+    arg_parser.add_argument("--batch",type=int,default=32)
     args = arg_parser.parse_args()
     current_time = get_time()
     if args.run_name == "dummy":
@@ -473,7 +484,7 @@ def parse_config():
     config = TrainConfig.json_deserialize(config_dict)
     #gpu_idx = args.gpus.split(',') if args.gpus else []
     #gpu_idx = [int(gpu.strip()) for gpu in gpu_idx]
-    training_setting = TrainSetting(run_name, config, args.gpus)
+    training_setting = TrainSetting(run_name, config, args.gpus, args.batch)
     return training_setting
 
 
@@ -482,7 +493,7 @@ import shutil
 
 def main():
     train_setting = parse_config()
-    train_model(total_loss, 9, train_setting)
+    train_model(sampling_loss_Rest, 6, train_setting)
 
 
 if __name__ == "__main__":

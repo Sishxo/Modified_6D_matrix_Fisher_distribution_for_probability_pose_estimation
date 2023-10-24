@@ -10,3 +10,9 @@ github_images
 *.out
 README.md
 README.txt
+weights/models--google--vit-base-patch16-224/tf_model.h5
+weights/models--google--vit-base-patch16-224/pytorch_model.bin
+weights/models--google--vit-base-patch16-224/preprocessor_config.json
+weights/models--google--vit-base-patch16-224/model.safetensors
+weights/models--google--vit-base-patch16-224/flax_model.msgpack
+weights/models--google--vit-base-patch16-224/config.json

@@ -18,8 +18,15 @@ class Logger():
     def __init__(self, logger_path, class_enum, config=None, load=False):
         self.logger_path = logger_path
         if not load and os.path.exists(logger_path):
-            raise Exception("rerunning old training")
-        elif not os.path.exists(logger_path):
+            if os.path.basename(logger_path).startswith('tmp'):
+                overwrite = 'y'
+            else:
+                overwrite = input('rerunning old training. Overwrite? ')
+            if overwrite.lower() == 'y':
+                os.system(f'rm -r {logger_path}')
+            else:
+                raise Exception("rerunning old training")
+        if not os.path.exists(logger_path):
             os.makedirs(logger_path)
             os.makedirs(os.path.join(logger_path, 'saved_weights'))
             if config is not None:
