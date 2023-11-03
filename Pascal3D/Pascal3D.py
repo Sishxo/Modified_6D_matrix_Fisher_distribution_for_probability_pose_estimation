@@ -510,17 +510,18 @@ def show_crop_bounding_box(img, bbox):
 
 import shutil
 class Pascal3D():
-    def __init__(self, dataset_location=None, image_size=224, train_all=False, use_warp=True, voc_train=False):
+    def __init__(self, dataset_location=None, image_size=224, train_all=False, use_warp=True, voc_train=False, source=None, category=None):
         print('start init pascal')
+        self.source = source
+        self.category = category
         self.image_out_size = image_size
         self.voc_train = voc_train
-        if dataset_location==None:
-            dataset_location = '/data0/sunshichu/projects/Public_prob_orientation_estimation_with_matrix_fisher_distributions/datasets'
+        if dataset_location == None:
+            dataset_location = '/home/tobii.intra/dmon/datasets'
         self.location = os.path.join(dataset_location, DATASET_FOLDER_NAME)
-        print(self.location)
         if not os.path.exists(self.location):
-            raise Exception("Not implemented yet")
-            download_pascal3d(self.location) #TODO unzip as well
+            raise Exception(f"Not implemented yet {self.location}")
+            download_pascal3d(self.location)  # TODO unzip as well
         if not os.path.exists(self.json_annotation_path()):
             json_annotation_path_tmp = os.path.join(self.location, 'json_tmp')
             if os.path.exists(json_annotation_path_tmp):
@@ -540,6 +541,9 @@ class Pascal3D():
     def dataset_split_path(self):
         return os.path.join(self.location, 'Image_sets')
 
+    def dataset_split_path_pascal(self):
+        return os.path.join(self.location, 'PASCAL/VOCdevkit/VOC2012/ImageSets/Main')
+
     def image_set_path(self):
         return os.path.join(self.location, 'Images')
 
@@ -551,17 +555,24 @@ class Pascal3D():
         return os.path.join(self.location, split_name)
 
     def get_split(self, validation_split_size=0.3):
-        stored_indices_path = self.stored_split_index()
-        if os.path.exists(stored_indices_path):
-            with open(stored_indices_path, 'r') as f:
-                return load_split(f)
+        # stored_indices_path = self.stored_split_index()
+        # if os.path.exists(stored_indices_path):
+        #     with open(stored_indices_path, 'r') as f:
+        #         return load_split(f)
+
+        if self.category is not None:
+            classes = [self.category]
+        else:
+            classes = PascalClasses
+
+        # ====== imagenet source ======
         split_names = ['train', 'val']
         splits = []
         num_files = 0
         dataset_split_path = self.dataset_split_path()
         for split_name in split_names:
             split = []
-            for cls in PascalClasses:
+            for cls in classes:
                 filepath = os.path.join(dataset_split_path, str(cls) + '_imagenet_' + split_name + '.txt')
                 with open(filepath, 'r') as f:
                     while True:
@@ -576,25 +587,68 @@ class Pascal3D():
                         img_path = os.path.join(str(cls) + '_imagenet', l + '.JPEG')
                         split.append(img_path)
             splits.append(split)
-        split_pascal = []
-        for directory in os.listdir(self.image_set_path()):
-            if directory.lower().find('pascal') != -1:
-                for fname in os.listdir(os.path.join(self.image_set_path(), directory)):
-                    split_pascal.append(os.path.join(directory, fname))
         test_split = splits[1]
         rest = splits[0]
         rest = sorted(rest)
-        val_idx = (np.arange(len(rest)*validation_split_size)/validation_split_size).astype(np.int)
+        val_idx = (np.arange(len(rest) * validation_split_size) / validation_split_size).astype(np.int)
         val_split = [rest[i] for i in val_idx]
-        train_split = sorted(list(set(rest)-set(val_split)))
-        if self.voc_train:
-            train_split = train_split + split_pascal
+        train_split = sorted(list(set(rest) - set(val_split)))
+        imagenet_train_split = train_split
+        imagenet_val_split = val_split
+        imagenet_test_split = test_split
 
-        ret = get_dataset_indices_from_imagefilenames([train_split, val_split, test_split], self.json_annotation_path())
-        with open(stored_indices_path, 'w') as f:
-            save_split(f, ret)
+        # ====== pascal source ======
+        split_names = ['train', 'val']
+        splits = []
+        num_files = 0
+        dataset_split_path = self.dataset_split_path_pascal()
+        for split_name in split_names:
+            split = []
+            for cls in classes:
+                filepath = os.path.join(dataset_split_path, str(cls) + '_' + split_name + '.txt')
+                with open(filepath, 'r') as f:
+                    while True:
+                        l = f.readline()
+                        if len(l) == 0:
+                            break
+                        if len(l.strip()) == 0:
+                            continue
+                        # choose the items with second term is 1
+                        l1, l2 = l.split()
+                        if l2.strip() == '1':
+                            num_files += 1
+                            img_path = os.path.join(str(cls) + '_pascal', l1 + '.jpg')
+                            split.append(img_path)
+            splits.append(split)
+        pascal_train_split = splits[0]
+        pascal_test_split = splits[1]
+
+        # split_pascal = []  # pascal
+        # for directory in os.listdir(self.image_set_path()):
+        #     if directory.lower().find('pascal') != -1:
+        #         for fname in os.listdir(os.path.join(self.image_set_path(), directory)):
+        #             split_pascal.append(os.path.join(directory, fname))
+        # if self.voc_train:
+        #     train_split = train_split + split_pascal
+
+        # validation set is manually split in imagenet data, if self.train_all, it is merged into train split
+        source_val_split = imagenet_val_split
+        if self.source == 'imagenet_imagenet':
+            source_train_split = imagenet_train_split
+            source_test_split = imagenet_test_split
+        elif self.source == 'both_pascal':
+            source_train_split = imagenet_train_split + pascal_train_split
+            source_test_split = pascal_test_split
+        elif self.source == "pascal_test_only":
+            source_train_split = imagenet_train_split + imagenet_test_split + pascal_train_split
+            source_test_split = pascal_test_split
+        else:
+            raise ValueError
+
+        ret = get_dataset_indices_from_imagefilenames([source_train_split, source_val_split, source_test_split], self.json_annotation_path())
+        # with open(stored_indices_path, 'w') as f:
+        #     save_split(f, ret)
         return ret
-
 
     def get_train(self, augmentation=False):
         if self.train_all:
@@ -619,7 +673,7 @@ class Pascal3D():
         if self.use_warp:
             return Pascal3DSubsetWarp(self.json_annotation_path(), self.image_set_path(), index, self.image_out_size, augmentation)
         else:
-            assert(augmentation is False)
+            assert (augmentation is False)
             return Pascal3DSubsetCrop(self.json_annotation_path(), self.image_set_path(), index, self.image_out_size)
 
 class Pascal3DSubsetWarp(Dataset):

@@ -4,6 +4,7 @@
     "embedding_dim": 32,
     "synthetic_data": false,
     "warp": true,
-    "pascal_train": false
+    "pascal_train": false,
+    "source":"imagenet_imagenet"
 }
 

@@ -229,15 +229,27 @@ class ResnetHead(nn.Module):
             self.class_embedding = None
         else:
             self.class_embedding = nn.Embedding(n_classes, embedding_dim)
-        self.head = nn.Sequential(
-            nn.Linear(768+embedding_dim, num_hidden_nodes),
-            nn.BatchNorm1d(num_hidden_nodes),
-            nn.LeakyReLU(),
-            nn.Linear(num_hidden_nodes, num_hidden_nodes),
-            nn.BatchNorm1d(num_hidden_nodes),
-            nn.LeakyReLU(),
-            nn.Linear(num_hidden_nodes, n_out)
-        )
+        if hasattr(self.base, 'output_size'):
+            self.head = nn.Sequential(
+                nn.Linear(self.base.output_size+embedding_dim, num_hidden_nodes),
+                nn.BatchNorm1d(num_hidden_nodes),
+                nn.LeakyReLU(),
+                nn.Linear(num_hidden_nodes, num_hidden_nodes),
+                nn.BatchNorm1d(num_hidden_nodes),
+                nn.LeakyReLU(),
+                nn.Linear(num_hidden_nodes, n_out)
+            )
+        else:
+            self.head = nn.Sequential(
+                nn.Linear(768+embedding_dim, num_hidden_nodes),
+                nn.BatchNorm1d(num_hidden_nodes),
+                nn.LeakyReLU(),
+                nn.Linear(num_hidden_nodes, num_hidden_nodes),
+                nn.BatchNorm1d(num_hidden_nodes),
+                nn.LeakyReLU(),
+                nn.Linear(num_hidden_nodes, n_out)
+            )
+            
 
     def forward(self, im, class_idx):
         latent_space = self.base(im)

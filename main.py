@@ -29,111 +29,78 @@ matplotlib.use("Agg")
 dataset_dir = "datasets"  # TODO change with dataset path
 
 
-def get_pascal_no_warp_loaders(batch_size, train_all, voc_train):
-    dataset = Pascal3D.Pascal3D(
-        dataset_dir, train_all=train_all, use_warp=False, voc_train=voc_train
-    )
+def get_pascal_no_warp_loaders(batch_size, train_all, voc_train, source, category=None):
+    dataset = Pascal3D.Pascal3D(dataset_dir, train_all=train_all, use_warp=False, voc_train=voc_train, source=source, category=category)
     dataloader_train = torch.utils.data.DataLoader(
         dataset.get_train(False),
         batch_size=batch_size,
         shuffle=True,
-        num_workers=16,
-        worker_init_fn=lambda _: np.random.seed(
-            torch.utils.data.get_worker_info().seed % (2**32)
-        ),
+        num_workers=8,
+        worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2 ** 32)),
         pin_memory=True,
-        drop_last=True,
-    )
+        drop_last=True)
     dataloader_eval = torch.utils.data.DataLoader(
         dataset.get_eval(),
         batch_size=batch_size,
         shuffle=False,
-        num_workers=16,
-        worker_init_fn=lambda _: np.random.seed(
-            torch.utils.data.get_worker_info().seed % (2**32)
-        ),
+        num_workers=8,
+        worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2 ** 32)),
         pin_memory=True,
-        drop_last=False,
-    )
+        drop_last=False)
     return dataloader_train, dataloader_eval
 
 
-def get_pascal_loaders(
-    batch_size, train_all, use_synthetic_data, use_augment, voc_train
-):
+def get_pascal_loaders(batch_size, train_all, use_synthetic_data, use_augment, voc_train, source, category=None):
     if use_synthetic_data:
-        return get_pascal_synthetic(batch_size, train_all, use_augment, voc_train)
+        return get_pascal_synthetic(batch_size, train_all, use_augment, voc_train, source, category)
     else:
-        dataset = Pascal3D.Pascal3D(
-            dataset_dir, train_all=train_all, use_warp=True, voc_train=voc_train
-        )
+        dataset = Pascal3D.Pascal3D(dataset_dir, train_all=train_all, use_warp=True, voc_train=voc_train, source=source, category=category)
         dataloader_train = torch.utils.data.DataLoader(
             dataset.get_train(use_augment),
             batch_size=batch_size,
             shuffle=True,
-            num_workers=32,
-            worker_init_fn=lambda _: np.random.seed(
-                torch.utils.data.get_worker_info().seed % (2**32)
-            ),
+            num_workers=8,
+            worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2 ** 32)),
             pin_memory=True,
-            drop_last=True,
-        )
+            drop_last=True)
         dataloader_eval = torch.utils.data.DataLoader(
             dataset.get_eval(),
             batch_size=batch_size,
             shuffle=False,
-            num_workers=32,
-            worker_init_fn=lambda _: np.random.seed(
-                torch.utils.data.get_worker_info().seed % (2**32)
-            ),
+            num_workers=8,
+            worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2 ** 32)),
             pin_memory=True,
-            drop_last=True,
-        )
+            drop_last=False)
         return dataloader_train, dataloader_eval
 
 
-def get_pascal_synthetic(batch_size, train_all, use_augmentation, voc_train):
-    dataset_real = Pascal3D.Pascal3D(
-        dataset_dir, train_all=train_all, use_warp=True, voc_train=voc_train
-    )
+def get_pascal_synthetic(batch_size, train_all, use_augmentation, voc_train, source, category):
+    dataset_real = Pascal3D.Pascal3D(dataset_dir, train_all=train_all, use_warp=True, voc_train=voc_train, source=source, category=category)
     train_real = dataset_real.get_train(use_augmentation)
     real_sampler = torch.utils.data.sampler.RandomSampler(train_real, replacement=False)
-    dataset_rendered = Pascal3D_render.Pascal3DRendered(dataset_dir)
-    rendered_size = int(
-        0.2 * len(dataset_rendered)
-    )  # use 20% of synthetic data for training per epoch
-    rendered_sampler = dataloader_utils.RandomSubsetSampler(
-        dataset_rendered, rendered_size
-    )
-    dataset_train, sampler_train = dataloader_utils.get_concatenated_dataset(
-        [(train_real, real_sampler), (dataset_rendered, rendered_sampler)]
-    )
+    dataset_rendered = Pascal3D_render.Pascal3DRendered(dataset_dir, category=category)
+    rendered_size = int(0.2 * len(dataset_rendered))  # use 20% of synthetic data for training per epoch
+    rendered_sampler = dataloader_utils.RandomSubsetSampler(dataset_rendered, rendered_size)
+    dataset_train, sampler_train = dataloader_utils.get_concatenated_dataset([(train_real, real_sampler), (dataset_rendered, rendered_sampler)])
 
     dataloader_train = torch.utils.data.DataLoader(
         dataset_train,
         sampler=sampler_train,
         batch_size=batch_size,
         num_workers=8,
-        worker_init_fn=lambda _: np.random.seed(
-            torch.utils.data.get_worker_info().seed % (2**32)
-        ),
+        worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2 ** 32)),
         pin_memory=True,
-        drop_last=True,
-    )
+        drop_last=True)
 
     dataloader_eval = torch.utils.data.DataLoader(
         dataset_real.get_eval(),
         batch_size=batch_size,
         shuffle=False,
         num_workers=8,
-        worker_init_fn=lambda _: np.random.seed(
-            torch.utils.data.get_worker_info().seed % (2**32)
-        ),
+        worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % (2 ** 32)),
         pin_memory=True,
-        drop_last=False,
-    )
+        drop_last=False)
     return dataloader_train, dataloader_eval
-
 
 def get_upna_loaders(batch_size, train_all):
     dataset = UPNA.n(dataset_dir)
@@ -191,7 +158,7 @@ def get_modelnet_loaders(batch_size, train_all):
     return dataloader_train, dataloader_eval
 
 
-def train_model(loss_func, out_dim, train_setting):
+def train_model(train_setting):
     # device = 'cpu'
     device = "cuda"
     batch_size = train_setting.batch
@@ -199,6 +166,28 @@ def train_model(loss_func, out_dim, train_setting):
     config = train_setting.config
     run_name = train_setting.run_name
     gpus = train_setting.gpus
+    category = train_setting.category
+    learning_rate = train_setting.lr
+    loss = train_setting.loss
+    net = train_setting.net
+    out_dim = train_setting.out_dim
+    
+    if loss=="sampling":
+        loss_func=sampling_loss_Rest
+    elif loss=="vmf":
+        loss_func=vmf_loss
+    else:
+        raise ValueError("no such loss named",loss)
+    
+    if net.lower()=="vit":
+        base = timm.create_model(
+            'vit_base_patch16_224.augreg2_in21k_ft_in1k',
+            pretrained=True,
+            num_classes=0,  # remove classifier nn.Linear
+            pretrained_cfg_overlay=dict(file='/data0/sunshichu/.cache/huggingface/hub/models--timm--vit_base_patch16_224.augreg2_in21k_ft_in1k/pytorch_model.bin'),
+        )
+    elif net.lower()=="resnet":
+        base = resnet101(pretrained=True, progress=True)
     
     os.environ["CUDA_VISIBLE_DEVICES"]=gpus
 
@@ -207,18 +196,11 @@ def train_model(loss_func, out_dim, train_setting):
     elif config.type == "modelnet":
         num_classes = 10
     else:
-        raise ValueError
+        raise ValueError("no such dataset")
 
-    # base = resnet101(pretrained=True, progress=True)
-    base = timm.create_model(
-    'vit_base_patch16_224.augreg2_in21k_ft_in1k',
-    pretrained=True,
-    num_classes=0,  # remove classifier nn.Linear
-    pretrained_cfg_overlay=dict(file='/data0/sunshichu/.cache/huggingface/hub/models--timm--vit_base_patch16_224.augreg2_in21k_ft_in1k/pytorch_model.bin'),
-    )
-
+    
     fisher_head = ResnetHead(
-        base, num_classes, config.embedding_dim, 512, out_dim
+            base, num_classes, config.embedding_dim, 512, out_dim
     )
     #rot_head = RotHeadNet(base.output_size)
     #model = Fisher_n6d(base, fisher_head, rot_head, batch_size)
@@ -235,18 +217,19 @@ def train_model(loss_func, out_dim, train_setting):
         use_augmentation = config.data_aug
         use_warp = config.warp
         voc_train = config.pascal_train
+        source = config.source
         if not use_warp:
             assert not use_synthetic_data
             assert not use_augmentation
             dataloader_train, dataloader_eval = get_pascal_no_warp_loaders(
-                batch_size, train_all, voc_train
+                batch_size, train_all, voc_train, source, category
             )
         else:
             dataloader_train, dataloader_eval = get_pascal_loaders(
-                batch_size, train_all, use_synthetic_data, use_augmentation, voc_train
+                batch_size, train_all, use_synthetic_data, use_augmentation, voc_train, source, category
             )
     elif config.type == "modelnet":
-        dataloader_train, dataloader_eval = get_modelnet_loaders(batch_size, train_all)
+        dataloader_train, dataloader_eval = get_modelnet_loaders(batch_size, train_all, category)
     elif config.type == "upna":
         dataloader_train, dataloader_eval = get_upna_loaders(batch_size, train_all)
     else:
@@ -263,7 +246,6 @@ def train_model(loss_func, out_dim, train_setting):
             finetune_parameters = list(model.head.parameters())+list(model.class_embedding.parameters()) 
         else:
             finetune_parameters = model.head.parameters()
-            drop_idx
         
     if config.type == "modelnet":
         num_epochs = 50
@@ -279,7 +261,7 @@ def train_model(loss_func, out_dim, train_setting):
     print(f'Loading SO3 discrete grids {grids_path}')
     grids = torch.from_numpy(np.load(grids_path)).to(device)
 
-    cur_lr = 0.01
+    cur_lr = learning_rate
     opt = torch.optim.SGD(finetune_parameters, lr=cur_lr)
     if config.type == "pascal":
         class_enum = Pascal3D.PascalClasses
@@ -287,7 +269,7 @@ def train_model(loss_func, out_dim, train_setting):
         class_enum = ModelNetSo3.ModelNetSo3Classes
         
     log_dir = "logs/{}/{}".format(config.type, run_name)
-    loggers = logger.Logger(log_dir, class_enum, config=config)
+    loggers = logger.Logger(log_dir, class_enum, config=config, train_setting=train_setting)
     
     for epoch in range(num_epochs):
         read_data_start_time = time.time()
@@ -357,22 +339,37 @@ def train_model(loss_func, out_dim, train_setting):
 
 
 class TrainSetting:
-    def __init__(self, run_name, config, gpus, batch):
-        self.run_name = run_name
+    def __init__(self, config, args):
+        self.run_name = args.run_name
         self.config = config
-        self.gpus = gpus
-        self.batch = batch
+        self.gpus = args.gpus
+        self.batch = args.batch
+        self.category = args.category
+        self.loss = args.loss
+        self.net = args.net
+        self.lr = args.lr
+        self.out_dim = args.out_dim
+        print("---- Train Setting -----")
+        for k, v in sorted(args.__dict__.items()):
+            self.__setattr__(k, v)
+            print(f"{k:20}: {v}")
 
     def json_serialize(self):
-        return {"run_name": self.run_name, "config": self.config, "gpus":self.gpus, "batch":self.batch}
+        return {
+            "run_name": self.run_name,
+            "gpus":self.gpus,
+            "batch":self.batch,
+            "category":self.category,
+            "loss":self.loss,
+            "net":self.net,
+            "lr":self.lr,
+            "out_dim":self.out_dim
+        }
 
     @staticmethod
     def json_deserialize(dic):
-        run_name = dic["run_name"]
         config = TrainConfig.json_deserialize(dic["config"])
-        gpus = dic["gpus"]
-        batch = dic
-        return TrainSetting(run_name, config, gpus, batch)
+        return TrainSetting(config)
 
 
 class TrainConfig:
@@ -399,13 +396,14 @@ class PascalConfig(TrainConfig):
     # embedding_dim is int
     # synthetic_data is bool
     # warp is bool
-    def __init__(self, data_aug, embedding_dim, synthetic_data, warp, pascal_train):
+    def __init__(self, data_aug, embedding_dim, synthetic_data, warp, pascal_train, source):
         super().__init__("pascal")
         self.data_aug = data_aug
         self.embedding_dim = embedding_dim
         self.synthetic_data = synthetic_data
         self.warp = warp
         self.pascal_train = pascal_train
+        self.source = source
 
     @staticmethod
     def json_deserialize(dic):
@@ -414,7 +412,8 @@ class PascalConfig(TrainConfig):
         synthetic_data = dic["synthetic_data"]
         warp = dic["warp"]
         pascal_train = dic["pascal_train"]
-        return PascalConfig(data_aug, embedding_dim, synthetic_data, warp, pascal_train)
+        source = dic["source"]
+        return PascalConfig(data_aug, embedding_dim, synthetic_data, warp, pascal_train, source)
 
     def json_serialize(self):
         return {
@@ -424,6 +423,7 @@ class PascalConfig(TrainConfig):
             "synthetic_data": self.synthetic_data,
             "warp": self.warp,
             "pascal_train": self.pascal_train,
+            "source": self.source
         }
 
 
@@ -465,18 +465,21 @@ def parse_config():
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("--run_name", type=str, default="dummy")
     arg_parser.add_argument("--config_file", type=str)
-    arg_parser.add_argument("--gpus",type=str, default='')
+    arg_parser.add_argument("--gpus",type=str, default='0')
     arg_parser.add_argument("--batch",type=int,default=32)
+    arg_parser.add_argument('--category', help='select category for ModelNet and Pascal3D+')
+    arg_parser.add_argument('--loss',type=str,default='sampling')
+    arg_parser.add_argument('--net',type=str,default='ViT')
+    arg_parser.add_argument('--lr', type=float, default=0.01)
+    arg_parser.add_argument('--out_dim',type=int,default=6)
     args = arg_parser.parse_args()
     current_time = get_time()
     if args.run_name == "dummy":
-        run_name = (
+        args.run_name = (
             os.path.splitext(os.path.basename(args.config_file))[0] + "_" + current_time
         )
-    else:
-        run_name = args.run_name
+        
     config_file = args.config_file
-    print(run_name, args.config_file)
     with open(config_file, "rb") as f:
         # json_bytes = f.read()
         # json_str = json_bytes.decode('utf-8')
@@ -484,7 +487,7 @@ def parse_config():
     config = TrainConfig.json_deserialize(config_dict)
     #gpu_idx = args.gpus.split(',') if args.gpus else []
     #gpu_idx = [int(gpu.strip()) for gpu in gpu_idx]
-    training_setting = TrainSetting(run_name, config, args.gpus, args.batch)
+    training_setting = TrainSetting(config, args)
     return training_setting
 
 
@@ -493,7 +496,7 @@ import shutil
 
 def main():
     train_setting = parse_config()
-    train_model(sampling_loss_Rest, 6, train_setting)
+    train_model(train_setting)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ import pickle
 import json
 
 class Logger():
-    def __init__(self, logger_path, class_enum, config=None, load=False):
+    def __init__(self, logger_path, class_enum, config=None, load=False, train_setting=None):
         self.logger_path = logger_path
         if not load and os.path.exists(logger_path):
             if os.path.basename(logger_path).startswith('tmp'):
@@ -32,6 +32,9 @@ class Logger():
             if config is not None:
                 with open(os.path.join(logger_path, 'config.json'), 'w') as f:
                     json.dump(config.json_serialize(), f)
+            if train_setting is not None:
+                with open(os.path.join(logger_path, 'train_setting.json'), 'w') as f:
+                    json.dump(train_setting.json_serialize(), f)
         self.class_enum = class_enum
         self.tb_summary_writer = tensorboardX.SummaryWriter(os.path.join(self.logger_path, 'logging'))
 
@@ -43,13 +46,21 @@ class Logger():
 
     def save_network(self, epoch, model):
         path = os.path.join(self.logger_path, 'saved_weights', 'state_dict_{}.pkl'.format(epoch))
+        # if isinstance(model, torch.nn.DataParallel):
+        #     state_dict = model.module.cpu().state_dict()
+        # else:
+        #     state_dict = model.cpu().state_dict()
+        # torch.save(state_dict, path)
         torch.save(model.state_dict(), path)
 
     def load_network_weights(self, epoch, model, device):
         path = os.path.join(self.logger_path, 'saved_weights', 'state_dict_{}.pkl'.format(epoch))
         with open(path, 'rb') as f:
             state_dict = torch.load(f, map_location=device)
-        model.load_state_dict(state_dict)
+        if isinstance(model, torch.nn.DataParallel):
+            model.module.load_state_dict(state_dict)
+        else:
+            model.load_state_dict(state_dict)
 
 class SubsetLogger():
     def __init__(self, logger, subset_name, epoch, verbose):
@@ -76,27 +87,38 @@ class SubsetLogger():
     def finish(self):
         tb_writer = self.logger.tb_summary_writer
         print('epoch {}: loss {}'.format(self.epoch, float(self.sum_loss/self.num_samples_loss)))
-        tb_writer.add_scalar('{}/loss'.format(self.subset_name), float(self.sum_loss/self.num_samples_loss), self.epoch)
-        easy_stats, all_stats = get_errors(self.angular_errors, self.class_indices, self.hard, self.logger.class_enum)
+        tb_writer.add_scalar('{}/loss'.format(self.subset_name), float(self.sum_loss/self.num_samples_loss), self.epoch) # loss scalar
+        easy_stats, hard_stats, all_stats = get_errors(self.angular_errors, self.class_indices, self.hard, self.logger.class_enum)
         x = [(all_stats, 'all')]
         if np.any(self.hard):
             x.append([easy_stats, 'easy'])
+            x.append([hard_stats, 'hard'])
         for y in x:
             stats = y[0]
             stat_name = y[1]
             stats_global = stats[0]
             stats_per_class = stats[1]
-            tb_writer.add_scalar('{}/Median_{}'.format(self.subset_name, stat_name), stats_global[0], self.epoch)
-            tb_writer.add_scalar('{}/Acc_at_30_{}'.format(self.subset_name, stat_name), stats_global[1], self.epoch)
-            tb_writer.add_scalar('{}/Acc_at_15_{}'.format(self.subset_name, stat_name), stats_global[2], self.epoch)
-            tb_writer.add_scalar('{}/Acc_at_7_5_{}'.format(self.subset_name, stat_name), stats_global[3], self.epoch)
-            tb_writer.add_histogram('{}/angle_errors_{}'.format(self.subset_name, stat_name), np.array(stats_global[4]), self.epoch)
+            tb_writer.add_scalar('{}/Median_{}'.format(self.subset_name, stat_name), stats_global[0], self.epoch) # subset_name:['train','val'], stat_name:['all', 'easy',]
+            tb_writer.add_scalar('{}/Mean_{}'.format(self.subset_name, stat_name), stats_global[1], self.epoch)
+            tb_writer.add_scalar('{}/Acc_at_30_{}'.format(self.subset_name, stat_name), stats_global[2], self.epoch)
+            tb_writer.add_scalar('{}/Acc_at_20_{}'.format(self.subset_name, stat_name), stats_global[3], self.epoch)
+            tb_writer.add_scalar('{}/Acc_at_15_{}'.format(self.subset_name, stat_name), stats_global[4], self.epoch)
+            tb_writer.add_scalar('{}/Acc_at_10_{}'.format(self.subset_name, stat_name), stats_global[5], self.epoch)
+            tb_writer.add_scalar('{}/Acc_at_7_5_{}'.format(self.subset_name, stat_name), stats_global[6], self.epoch)
+            tb_writer.add_scalar('{}/Acc_at_5_{}'.format(self.subset_name, stat_name), stats_global[7], self.epoch)
+            tb_writer.add_scalar('{}/Acc_at_3_{}'.format(self.subset_name, stat_name), stats_global[8], self.epoch)
+            tb_writer.add_histogram('{}/angle_errors_{}'.format(self.subset_name, stat_name), np.array(stats_global[9]), self.epoch)
             for class_name, class_stats in stats_per_class.items():
-                tb_writer.add_scalar('per_class_{}/{}_Median_{}'.format(self.subset_name, class_name, stat_name), class_stats[0], self.epoch)
-                tb_writer.add_scalar('per_class_{}/{}_Acc_at_30_{}'.format(self.subset_name, class_name, stat_name), class_stats[1], self.epoch)
-                tb_writer.add_scalar('per_class_{}/{}_Acc_at_15_{}'.format(self.subset_name, class_name, stat_name), class_stats[2], self.epoch)
-                tb_writer.add_scalar('per_class_{}/{}_Acc_at_7_5_{}'.format(self.subset_name, class_name, stat_name), class_stats[3], self.epoch)
-                tb_writer.add_histogram('per_class_{}/{}_angle_errors_{}'.format(self.subset_name, class_name, stat_name), np.array(class_stats[4]), self.epoch)
+                    tb_writer.add_scalar('per_class_{}/{}_Median_{}'.format(self.subset_name, class_name, stat_name), class_stats[0], self.epoch)
+                    tb_writer.add_scalar('per_class_{}/{}_Mean_{}'.format(self.subset_name, class_name, stat_name), class_stats[1], self.epoch)
+                    tb_writer.add_scalar('per_class_{}/{}_Acc_at_30_{}'.format(self.subset_name, class_name, stat_name), class_stats[2], self.epoch)
+                    tb_writer.add_scalar('per_class_{}/{}_Acc_at_20_{}'.format(self.subset_name, class_name, stat_name), class_stats[3], self.epoch)
+                    tb_writer.add_scalar('per_class_{}/{}_Acc_at_15_{}'.format(self.subset_name, class_name, stat_name), class_stats[4], self.epoch)
+                    tb_writer.add_scalar('per_class_{}/{}_Acc_at_10_{}'.format(self.subset_name, class_name, stat_name), class_stats[5], self.epoch)
+                    tb_writer.add_scalar('per_class_{}/{}_Acc_at_7_5_{}'.format(self.subset_name, class_name, stat_name), class_stats[6], self.epoch)
+                    tb_writer.add_scalar('per_class_{}/{}_Acc_at_5_{}'.format(self.subset_name, class_name, stat_name), class_stats[7], self.epoch)
+                    tb_writer.add_scalar('per_class_{}/{}_Acc_at_3_{}'.format(self.subset_name, class_name, stat_name), class_stats[8], self.epoch)
+                    tb_writer.add_histogram('per_class_{}/{}_angle_errors_{}'.format(self.subset_name, class_name, stat_name), np.array(class_stats[-1]), self.epoch)
 
 
 

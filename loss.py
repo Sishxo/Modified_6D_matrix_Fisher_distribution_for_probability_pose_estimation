@@ -76,10 +76,11 @@ def trace_A_grid_R(A, R, grids, type="grids"):
     return trace
 
 
-def batch_torch_A_to_R(A):
-    # A(batch,3,2)
-
-    A = torch_6d_to_matrix(A.view(-1, 6))
+def batch_torch_A_to_R(A,loss):
+    if loss=='sampling':
+        A = torch_6d_to_matrix(A.view(-1, 6)) # 6d A(batch,3,2)
+    elif loss =='vmf':
+        pass
 
     device = A.device
     if CPUSVD:
@@ -94,7 +95,7 @@ def batch_torch_A_to_R(A):
 
 
 def discrete_sampling_log_loss(A, R, grids, overreg):
-    sampling_trace = trace_A_grid_R(A, R, grids, "grids")  # A(b,3,2)  grids(4096,3,2)
+    sampling_trace = trace_A_grid_R(A, R, grids, "grids")  # (bs,3,2) R(bs,3,3) grids(N,3,3)
 
     # trick from rotation_laplace preventing numerical explosion
     max_trace = sampling_trace.max(dim=-1)[0]
@@ -116,21 +117,21 @@ def sampling_loss_Rest(net_out, R, grids, overreg=1.025):
     
     # A(bs,3,2) R(bs,3,3) grids(N,3,3)
     loss = discrete_sampling_log_loss(A, R, grids, overreg)
-    Rest = batch_torch_A_to_R(A)
+    Rest = batch_torch_A_to_R(A,'sampling')
     return loss, Rest
 
 
 def vmf_loss(net_out, R, grids, overreg=1.025):
     # A(b,3,2)  R(b,3,2)
-    A = net_out.view(-1, 3, 2)
-    R = torch_matrix_to_6d(R)
+    A = net_out.view(-1, 3, 3)
+    # R = torch_matrix_to_6d(R)
     loss_v = KL_Fisher(A, R, overreg=overreg)
     if loss_v is None:
         Rest = torch.unsqueeze(torch.eye(3, 3, device=R.device, dtype=R.dtype), 0)
         Rest = torch.repeat_interleave(Rest, R.shape[0], 0)
         return None, Rest
 
-    Rest = batch_torch_A_to_R(A)
+    Rest = batch_torch_A_to_R(A,'vmf')
     return loss_v, Rest
 
 
@@ -348,14 +349,16 @@ def KL_Fisher(A, R, overreg=1.05):
     # R is bx3x3
     global _global_svd_fail_counter
     try:
-        U, S, V = torch.svd(torch_6d_to_matrix(A.view(-1, 6)))
+        # U, S, V = torch.svd(torch_6d_to_matrix(A.view(-1, 6)))
+        U, S, V = torch.svd(A)
         with torch.no_grad():  # sign can only change if the 3rd component of the svd is 0, then the sign does not matter
             rotation_candidate = torch.matmul(U, V.transpose(1, 2))
             s3sign = torch.det(rotation_candidate)
         S_sign = S.clone()
         S_sign[:, 2] *= s3sign
         log_normalizer = torch_norm_factor.logC_F(S_sign)
-        log_exponent = -torch.matmul(A.view(-1, 1, 6), R.view(-1, 6, 1)).view(-1)
+        # log_exponent = -torch.matmul(A.view(-1, 1, 6), R.view(-1, 6, 1)).view(-1)
+        log_exponent = -torch.matmul(A.view(-1, 1, 9), R.view(-1, 9, 1)).view(-1)
         _global_svd_fail_counter = max(0, _global_svd_fail_counter - 1)
         return log_exponent + overreg * log_normalizer
     except RuntimeError as e:
