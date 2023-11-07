@@ -171,6 +171,7 @@ def train_model(train_setting):
     loss = train_setting.loss
     net = train_setting.net
     out_dim = train_setting.out_dim
+    optimizer = train_setting.opt
     
     if loss=="sampling":
         loss_func=sampling_loss_Rest
@@ -262,7 +263,10 @@ def train_model(train_setting):
     grids = torch.from_numpy(np.load(grids_path)).to(device)
 
     cur_lr = learning_rate
-    opt = torch.optim.SGD(finetune_parameters, lr=cur_lr)
+    if optimizer.lower()=='sgd':
+        opt = torch.optim.SGD(finetune_parameters, lr=cur_lr)
+    elif optimizer.lower()=='adam':
+        opt = torch.optim.Adam(finetune_parameters,lr=cur_lr)
     if config.type == "pascal":
         class_enum = Pascal3D.PascalClasses
     else:
@@ -274,13 +278,17 @@ def train_model(train_setting):
     for epoch in range(num_epochs):
         read_data_start_time = time.time()
         verbose = epoch % 20 == 0 or epoch == num_epochs - 1
-        if epoch == drop_epochs[drop_idx]:
-            cur_lr *= 0.1
-            drop_idx += 1
-            opt = torch.optim.SGD(model.parameters(), lr=cur_lr)
-        elif epoch == stop_finetune_epoch:
-            opt = torch.optim.SGD(model.parameters(), lr=cur_lr)
+        
+        if optimizer.lower()=='sgd':
+            if epoch == drop_epochs[drop_idx]:
+                cur_lr *= 0.1
+                drop_idx += 1
+                opt = torch.optim.SGD(model.parameters(), lr=cur_lr)
+            elif epoch == stop_finetune_epoch:
+                opt = torch.optim.SGD(model.parameters(), lr=cur_lr)
+        
         logger_train = loggers.get_train_logger(epoch, verbose)
+
         model.train()
         for image, extrinsic, class_idx_cpu, hard, _, _ in tqdm(dataloader_train):
             image = image.to(device)
@@ -349,6 +357,7 @@ class TrainSetting:
         self.net = args.net
         self.lr = args.lr
         self.out_dim = args.out_dim
+        self.opt = args.opt
         print("---- Train Setting -----")
         for k, v in sorted(args.__dict__.items()):
             self.__setattr__(k, v)
@@ -363,7 +372,8 @@ class TrainSetting:
             "loss":self.loss,
             "net":self.net,
             "lr":self.lr,
-            "out_dim":self.out_dim
+            "out_dim":self.out_dim,
+            "opt":self.opt
         }
 
     @staticmethod
@@ -472,6 +482,7 @@ def parse_config():
     arg_parser.add_argument('--net',type=str,default='ViT')
     arg_parser.add_argument('--lr', type=float, default=0.01)
     arg_parser.add_argument('--out_dim',type=int,default=6)
+    arg_parser.add_argument('--opt',type=str,default='Adam')
     args = arg_parser.parse_args()
     current_time = get_time()
     if args.run_name == "dummy":
